@@ -1,0 +1,29 @@
+{
+  "name": "evolving-dkg",
+  "version": "1.0.0",
+  "description": "ElGamal encryption/decryption implementation using Circom and Baby Jubjub curve",
+  "main": "index.js",
+  "scripts": {
+    "install-circom": "npm install circomlib",
+    "compile-encrypt": "circom circuits/encryption.circom --r1cs --wasm --sym -o build/",
+    "compile-decrypt": "circom circuits/decryption.circom --r1cs --wasm --sym -o build/",
+    "compile-all": "npm run compile-encrypt && npm run compile-decrypt",
+    "test": "echo \"Tests not implemented yet\" && exit 1"
+  },
+  "keywords": [
+    "circom",
+    "zero-knowledge",
+    "elgamal",
+    "encryption",
+    "baby-jubjub",
+    "cryptography"
+  ],
+  "author": "Your Name",
+  "license": "MIT",
+  "dependencies": {
+    "circomlib": "^2.0.5"
+  },
+  "devDependencies": {
+    "circom": "^2.1.0"
+  }
+}

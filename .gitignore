@@ -1,0 +1,45 @@
+# Build outputs
+build/
+target/
+dist/
+
+# Dependencies
+node_modules/
+Cargo.lock
+
+# Generated keys (security)
+sk.txt
+pk.txt
+*.key
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+
+# Environment files
+.env
+.env.local
+
+# Circom specific
+*.r1cs
+*.wasm
+*.sym
+circuit.json
+verification_key.json
+proving_key.json
+witness.wtns
+proof.json
+public.json
+
+# Rust specific
+**/*.rs.bk
