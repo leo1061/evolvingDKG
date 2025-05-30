@@ -1,5 +1,5 @@
 use ark_bn254::{Fr, G1Projective};
-use ark_ec::{PrimeGroup, CurveGroup};   // ← PrimeGroup per generator(), CurveGroup per into_affine()
+use ark_ec::{Group, CurveGroup};   // Changed PrimeGroup to Group
 use ark_ff::{UniformRand, PrimeField};   // ← PrimeField per into_bigint()
 use rand::thread_rng;
 use anyhow::Result;
@@ -11,7 +11,7 @@ fn main() -> Result<()> {
     let sk: Fr = Fr::rand(&mut rng);
 
     // 2) Public key = G * sk
-    let G = G1Projective::generator();
+    let G = G1Projective::generator();  // This should work now with Group trait in scope
     let pk_proj = G * sk;
     let pk_aff = pk_proj.into_affine();    // ora disponibile
 
