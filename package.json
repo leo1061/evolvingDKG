@@ -5,8 +5,8 @@
   "main": "index.js",
   "scripts": {
     "install-circom": "npm install circomlib",
-    "compile-encrypt": "circom circuits/encryption.circom --r1cs --wasm --sym -o build/",
-    "compile-decrypt": "circom circuits/decryption.circom --r1cs --wasm --sym -o build/",
+    "compile-encrypt": "circom circuits/encryption.circom --r1cs --wasm --sym -o build/ -l node_modules",
+    "compile-decrypt": "circom circuits/decryption.circom --r1cs --wasm --sym -o build/ -l node_modules",
     "compile-all": "npm run compile-encrypt && npm run compile-decrypt",
     "test": "echo \"Tests not implemented yet\" && exit 1"
   },
