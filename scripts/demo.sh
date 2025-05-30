@@ -2,86 +2,164 @@
 
 set -e
 
+# Function to clean up build artifacts
+cleanup() {
+    echo "🧹 Cleaning up build artifacts..."
+    rm -rf build
+    mkdir -p build
+    rm -f bjj_sk.txt bjj_pk.txt
+    rm -f *.wtns
+    if [ -f "package.json" ]; then
+        mv package.json package.json.tmp
+        rm -f *.json
+        mv package.json.tmp package.json
+    else
+        rm -f *.json
+    fi
+    echo "✅ Cleanup complete"
+}
+
+# Function to handle errors
+handle_error() {
+    echo "❌ Error occurred at step: $1"
+    cleanup
+    exit 1
+}
+
+# Set up error handling
+trap 'handle_error $LINENO' ERR
+
 echo "🔐 ElGamal Demo Script"
 echo "====================="
 
-echo "1. Generating keys..."
-cd rust-keygen
-cargo run --bin keygen
-cd ..
+# Clean up any existing artifacts
+# cleanup
+mkdir -p build
+
+echo "1. Generating BabyJubJub keys..."
+node scripts/gen_bjj_keys.js
+
+# Use BabyJubJub keys
+SK=$(cat bjj_sk.txt)
+# Parse public key as numbers (not strings)
+PUBKEY=$(cat bjj_pk.txt | jq '[.[] | tonumber]')
+
+# Optionally, keep the old Rust keygen for reference
+# echo "1. Generating keys..."
+# cd rust-keygen
+# cargo run --bin keygen
+# cd ..
 
 echo "2. Compiling circuits..."
 npm run compile-all
 
 echo "3. Keys generated:"
-if [ -f "sk.txt" ]; then
-    echo "✅ Private key: sk.txt"
+if [ -f "bjj_sk.txt" ]; then
+    echo "✅ BabyJubJub Private key: bjj_sk.txt"
 else
-    echo "❌ Private key not found"
+    echo "❌ Missing private key"
+    exit 1
 fi
 
-if [ -f "pk.txt" ]; then
-    echo "✅ Public key: pk.txt"
+if [ -f "bjj_pk.txt" ]; then
+    echo "✅ BabyJubJub Public key: bjj_pk.txt"
 else
-    echo "❌ Public key not found"
+    echo "❌ Missing public key"
+    exit 1
 fi
 
 echo "4. Circuits compiled:"
 if [ -d "build" ]; then
     echo "✅ Build directory created"
-    ls -la build/
+    ls -l build
 else
-    echo "❌ Build directory not found"
+    echo "❌ Missing build directory"
+    exit 1
 fi
 
-# --- Encryption/Decryption Demo ---
+# 5. Encrypt message
+MSG=123
+echo -e "\n5. Encrypting message $MSG..."
+# Encode message as a BabyJubJub point and ensure it's a proper number array
+ENCODED_MSG=$(node scripts/encode_message.js $MSG | grep -o '\[.*\]' | jq '[.[] | tonumber]')
 
-# Check if encryption circuit was compiled
-if [ ! -f build/encryption_js/encryption.wasm ]; then
-    echo "❌ Encryption circuit wasm not found. Skipping encryption/decryption demo."
-    echo "🎉 Demo complete!"
-    exit 0
-fi
+# Generate a random nonce key that's within the field range using BigInt
+NONCE_KEY=$(node -e "
+const fieldSize = BigInt('21888242871839275222246405745257275088548364400416034343698204186575808495617');
+const randomBytes = require('crypto').randomBytes(10);
+const randomBigInt = BigInt('0x' + randomBytes.toString('hex'));
+console.log((randomBigInt % fieldSize).toString());
+")
 
-MESSAGE=42
-NONCE=12345
-PUBKEY_X=$(head -n 1 pk.txt)
-PUBKEY_Y=$(tail -n 1 pk.txt)
-
-cat > encrypt_input.json <<EOF
+# Create input.json for the circuit
+cat > build/input.json << EOF
 {
-  "plaintext": $MESSAGE,
-  "nonceKey": $NONCE,
-  "publicKey": [$PUBKEY_X, $PUBKEY_Y]
+    "message": $(echo $ENCODED_MSG | jq '[.[] | tostring]'),
+    "nonceKey": "$NONCE_KEY",
+    "publicKey": $(echo $PUBKEY | jq '[.[] | tostring]')
 }
 EOF
 
-echo "\n5. Encrypting message $MESSAGE..."
-node build/encryption_js/generate_witness.js build/encryption_js/encryption.wasm encrypt_input.json encrypt_witness.wtns
+# Generate witness
+cd build/encryption_js
+node generate_witness.js encryption.wasm ../input.json ../witness.wtns
+cd ../..
 
-CIPHERTEXT=$(snarkjs wtns export json encrypt_witness.wtns | jq '.encryptedMessage')
-echo "Encrypted message: $CIPHERTEXT"
+# Generate zkey files
+echo -e "\n6. Generating zkey files..."
+# snarkjs powersoftau new bn128 12 build/pot12_0000.ptau -v
+snarkjs powersoftau new bn128 14 build/pot12_0000.ptau -v
 
-# Prepare decryption input (assuming decryption circuit expects ciphertext, nonceKey, sk)
-SK=$(cat sk.txt)
-C1=$(echo $CIPHERTEXT | jq '.[0]')
-C2=$(echo $CIPHERTEXT | jq '.[1]')
+snarkjs powersoftau contribute build/pot12_0000.ptau build/pot12_0001.ptau --name="First contribution" --entropy="some random text here" -v
+snarkjs powersoftau prepare phase2 build/pot12_0001.ptau build/pot12_final.ptau -v
 
-cat > decrypt_input.json <<EOF
+# Generate encryption zkey files
+snarkjs groth16 setup build/encryption.r1cs build/pot12_final.ptau build/encryption_0000.zkey
+snarkjs zkey contribute build/encryption_0000.zkey build/encryption_0001.zkey --name="First contribution" --entropy="more random text" -v
+snarkjs zkey export verificationkey build/encryption_0001.zkey build/verification_key.json
+cp build/encryption_0001.zkey build/encryption_final.zkey
+
+# Generate decryption zkey files
+snarkjs groth16 setup build/decryption.r1cs build/pot12_final.ptau build/decryption_0000.zkey
+snarkjs zkey contribute build/decryption_0000.zkey build/decryption_0001.zkey --name="First contribution" --entropy="even more random text" -v
+snarkjs zkey export verificationkey build/decryption_0001.zkey build/decrypt_verification_key.json
+cp build/decryption_0001.zkey build/decryption_final.zkey
+# 7. Generate proof
+echo -e "\n7. Generating proof..."
+snarkjs groth16 prove build/encryption_final.zkey build/witness.wtns build/proof.json build/public.json
+
+# 8. Verify proof
+echo -e "\n8. Verifying proof..."
+snarkjs groth16 verify build/verification_key.json build/public.json build/proof.json
+
+# 9. Decrypt message
+echo -e "\n9. Decrypting message..."
+# Create decryption input
+cat > build/decrypt_input.json << EOF
 {
-  "ciphertext": [$C1, $C2],
-  "nonceKey": $NONCE,
-  "sk": $SK
+  "ephemeralKey": [
+    $(cat build/public.json | jq '.[0]'),
+    $(cat build/public.json | jq '.[1]')
+  ],
+  "encryptedMessage": [
+    $(cat build/public.json | jq '.[2]'),
+    $(cat build/public.json | jq '.[3]')
+  ],
+  "privateKey": "$SK"
 }
 EOF
 
-echo "\n6. Decrypting message..."
-if [ -f build/decryption_js/decryption.wasm ]; then
-  node build/decryption_js/generate_witness.js build/decryption_js/decryption.wasm decrypt_input.json decrypt_witness.wtns
-  DECRYPTED=$(snarkjs wtns export json decrypt_witness.wtns | jq '.plaintext')
-  echo "Decrypted message: $DECRYPTED"
-else
-  echo "❌ Decryption circuit wasm not found. Skipping decryption."
-fi
+cd build/decryption_js
+node generate_witness.js decryption.wasm ../decrypt_input.json ../decrypt_witness.wtns
+cd ../..
 
-echo "🎉 Demo complete!"
+# Generate decryption proof
+snarkjs groth16 prove build/decryption_final.zkey build/decrypt_witness.wtns build/decrypt_proof.json build/decrypt_public.json
+
+# Verify decryption proof
+snarkjs groth16 verify build/decrypt_verification_key.json build/decrypt_public.json build/decrypt_proof.json
+
+echo -e "\n✅ Demo completed successfully!"
+
+
+echo -e "\n✨ All done! Build artifacts are preserved in the build directory."

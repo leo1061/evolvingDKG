@@ -21,6 +21,7 @@
   "author": "Your Name",
   "license": "MIT",
   "dependencies": {
-    "circomlib": "^2.0.5"
+    "circomlib": "^2.0.0",
+    "circomlibjs": "^0.1.2"
   }
 }
