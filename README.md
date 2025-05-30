@@ -8,18 +8,19 @@ This project implements ElGamal encryption and decryption using zero-knowledge p
 
 - **Encryption Circuit** (`circuits/encryption.circom`): Encrypts messages on the Baby Jubjub curve
 - **Decryption Circuit** (`circuits/decryption.circom`): Decrypts ciphertext while proving knowledge of the private key
-- **Key Generation** (`rust-keygen/main.rs`): Generates cryptographic key pairs using arkworks
+
+> **Note**: The Rust key generation component (`rust-keygen/`) is deprecated and will be removed in a future update. Key generation functionality will be integrated directly into the main codebase.
 
 ## 🏗️ Architecture
 
 ```
-┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
-│   Key Gen       │    │   Encryption     │    │   Decryption    │
-│   (Rust)        │───▶│   (Circom)       │───▶│   (Circom)      │
-│                 │    │                  │    │                 │
-│ • Generate sk   │    │ • Encode message │    │ • Prove sk      │
-│ • Compute pk    │    │ • ElGamal encrypt│    │ • Decrypt C2    │
-└─────────────────┘    └──────────────────┘    └─────────────────┘
+┌──────────────────┐    ┌─────────────────┐
+│   Encryption     │    │   Decryption    │
+│   (Circom)       │───▶│   (Circom)      │
+│                  │    │                 │
+│ • Encode message │    │ • Prove sk      │
+│ • ElGamal encrypt│    │ • Decrypt C2    │
+└──────────────────┘    └─────────────────┘
 ```
 
 ## 🚀 Quick Start
@@ -27,26 +28,20 @@ This project implements ElGamal encryption and decryption using zero-knowledge p
 ### Prerequisites
 
 - [Node.js](https://nodejs.org/) (v16+)
-- [Rust](https://rustup.rs/) (latest stable)
 - [Circom](https://docs.circom.io/getting-started/installation/)
 
 ### Installation
 
 1. **Clone and setup**:
+
    ```bash
    git clone https://github.com/yourusername/evolvingDKG.git
    cd evolvingDKG
    npm install
+   npm run install-circom
    ```
 
-2. **Generate keys**:
-   ```bash
-   cd rust-keygen
-   cargo run --bin keygen
-   cd ..
-   ```
-
-3. **Compile circuits**:
+2. **Compile circuits**:
    ```bash
    npm run compile-all
    ```
@@ -58,14 +53,14 @@ evolvingDKG/
 ├── circuits/           # Circom circuit files
 │   ├── encryption.circom
 │   └── decryption.circom
-├── rust-keygen/        # Rust key generation
-│   ├── Cargo.toml
-│   └── main.rs
 ├── scripts/            # Utility scripts
 ├── examples/           # Usage examples
 ├── tests/              # Test files
 ├── docs/               # Documentation
-├── package.json        # Node.js dependencies
+├── build/             # Compiled circuit outputs
+├── bjj_sk.txt         # Generated private key
+├── bjj_pk.txt         # Generated public key
+├── package.json       # Node.js dependencies
 └── README.md
 ```
 
@@ -83,7 +78,7 @@ The implementation uses the Baby Jubjub elliptic curve with the following parame
 
 1. **Message Encoding**: `M = plaintext * G`
 2. **Key Generation**: `pk = sk * G`
-3. **Encryption**: 
+3. **Encryption**:
    - `C1 = r * G` (ephemeral key)
    - `C2 = M + r * pk` (encrypted message)
 
@@ -94,16 +89,8 @@ The implementation uses the Baby Jubjub elliptic curve with the following parame
 
 ## 🧪 Usage Examples
 
-### Key Generation
-```rust
-// Generate random private key
-let sk: Fr = Fr::rand(&mut rng);
-
-// Compute public key
-let pk = G * sk;
-```
-
 ### Encryption (Circom)
+
 ```javascript
 // Inputs
 signal input message[2];      // Encoded message point
@@ -116,6 +103,7 @@ signal output encryptedMessage[2]; // C2
 ```
 
 ### Decryption (Circom)
+
 ```javascript
 // Inputs
 signal input sk;    // Private key
@@ -130,6 +118,7 @@ signal output my;   // Decrypted message y
 ## 🛠️ Development
 
 ### Building Circuits
+
 ```bash
 # Compile encryption circuit
 npm run compile-encrypt
@@ -141,15 +130,7 @@ npm run compile-decrypt
 npm run compile-all
 ```
 
-### Key Generation
-```bash
-cd rust-keygen
-cargo run --bin keygen
-```
-
-This generates:
-- `sk.txt`: Private key (scalar)
-- `pk.txt`: Public key (x, y coordinates)
+> **Note**: The Rust key generation component (`rust-keygen/`) is deprecated and will be removed. Key generation functionality will be integrated directly into the main codebase in a future update.
 
 ## 🔒 Security Considerations
 
@@ -161,41 +142,10 @@ This generates:
 ## 📚 Dependencies
 
 ### Node.js
-- `circomlib`: Circom circuit library
-- `circom`: Circuit compiler
 
-### Rust
-- `ark-bn254`: BN254 curve implementation
-- `ark-ec`: Elliptic curve operations
-- `ark-ff`: Finite field arithmetic
-- `rand`: Secure random number generation
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
+- `circomlib`: ^2.0.0 - Circom circuit library
+- `circomlibjs`: ^0.1.2 - JavaScript utilities for Circom
 
 ## 📄 License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## 🙏 Acknowledgments
-
-- [Circom](https://circom.io/) for the zero-knowledge circuit framework
-- [arkworks](https://arkworks.rs/) for elliptic curve cryptography
-- [Baby Jubjub](https://eips.ethereum.org/EIPS/eip-2494) curve specification
-
-## 📞 Support
-
-If you have questions or need help:
-
-1. Check the [documentation](docs/)
-2. Open an issue on GitHub
-3. Join our discussions
-
----
-
-Built with ❤️ for the zero-knowledge community
