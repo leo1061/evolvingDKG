@@ -2,7 +2,7 @@
 
 A zero-knowledge ElGamal encryption/decryption implementation using Circom circuits and the Baby Jubjub elliptic curve.
 
-## 🔍 Overview
+## Overview
 
 This project implements ElGamal encryption and decryption using zero-knowledge proofs:
 
@@ -11,7 +11,7 @@ This project implements ElGamal encryption and decryption using zero-knowledge p
 
 > **Note**: The Rust key generation component (`rust-keygen/`) is deprecated and will be removed in a future update. Key generation functionality will be integrated directly into the main codebase.
 
-## 🏗️ Architecture
+## ️ Architecture
 
 ```
 ┌──────────────────┐    ┌─────────────────┐
@@ -23,7 +23,7 @@ This project implements ElGamal encryption and decryption using zero-knowledge p
 └──────────────────┘    └─────────────────┘
 ```
 
-## 🚀 Quick Start
+## Quick Start
 
 ### Prerequisites
 
@@ -46,7 +46,7 @@ This project implements ElGamal encryption and decryption using zero-knowledge p
    npm run compile-all
    ```
 
-## 📁 Project Structure
+## Project Structure
 
 ```
 evolvingDKG/
@@ -64,7 +64,7 @@ evolvingDKG/
 └── README.md
 ```
 
-## 🔐 Cryptographic Details
+## Cryptographic Details
 
 ### ElGamal Encryption
 
@@ -87,7 +87,7 @@ The implementation uses the Baby Jubjub elliptic curve with the following parame
 1. **Shared Secret**: `S = sk * C1`
 2. **Message Recovery**: `M = C2 - S`
 
-## 🧪 Usage Examples
+## Usage Examples
 
 ### Encryption (Circom)
 
@@ -115,7 +115,7 @@ signal output mx;   // Decrypted message x
 signal output my;   // Decrypted message y
 ```
 
-## 🛠️ Development
+## ️ Development
 
 ### Building Circuits
 
@@ -132,20 +132,20 @@ npm run compile-all
 
 > **Note**: The Rust key generation component (`rust-keygen/`) is deprecated and will be removed. Key generation functionality will be integrated directly into the main codebase in a future update.
 
-## 🔒 Security Considerations
+## Security Considerations
 
 - Uses cryptographically secure random number generation
 - Implements curve point validation to prevent invalid curve attacks
 - Protects against identity point attacks
 - All operations performed in the BN254 scalar field
 
-## 📚 Dependencies
+## Dependencies
 
 ### Node.js
 
 - `circomlib`: ^2.0.0 - Circom circuit library
 - `circomlibjs`: ^0.1.2 - JavaScript utilities for Circom
 
-## 📄 License
+## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.

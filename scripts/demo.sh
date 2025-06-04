@@ -16,12 +16,12 @@ cleanup() {
     else
         rm -f *.json
     fi
-    echo "✅ Cleanup complete"
+    echo "Cleanup complete"
 }
 
 # Function to handle errors
 handle_error() {
-    echo "❌ Error occurred at step: $1"
+    echo "Error occurred at step: $1"
     cleanup
     exit 1
 }
@@ -55,25 +55,25 @@ npm run compile-all
 
 echo "3. Keys generated:"
 if [ -f "bjj_sk.txt" ]; then
-    echo "✅ BabyJubJub Private key: bjj_sk.txt"
+    echo "BabyJubJub Private key: bjj_sk.txt"
 else
-    echo "❌ Missing private key"
+    echo "Missing private key"
     exit 1
 fi
 
 if [ -f "bjj_pk.txt" ]; then
-    echo "✅ BabyJubJub Public key: bjj_pk.txt"
+    echo "BabyJubJub Public key: bjj_pk.txt"
 else
-    echo "❌ Missing public key"
+    echo "Missing public key"
     exit 1
 fi
 
 echo "4. Circuits compiled:"
 if [ -d "build" ]; then
-    echo "✅ Build directory created"
+    echo "Build directory created"
     ls -l build
 else
-    echo "❌ Missing build directory"
+    echo "Missing build directory"
     exit 1
 fi
 
@@ -159,7 +159,7 @@ snarkjs groth16 prove build/decryption_final.zkey build/decrypt_witness.wtns bui
 # Verify decryption proof
 snarkjs groth16 verify build/decrypt_verification_key.json build/decrypt_public.json build/decrypt_proof.json
 
-echo -e "\n✅ Demo completed successfully!"
+echo -e "\nDemo completed successfully!"
 
 
 echo -e "\n✨ All done! Build artifacts are preserved in the build directory."
