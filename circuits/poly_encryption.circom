@@ -5,7 +5,7 @@ include "circomlib/circuits/bitify.circom";
 include "circomlib/circuits/escalarmulany.circom";
 include "circomlib/circuits/escalarmulfix.circom";
 include "circomlib/circuits/comparators.circom";
-include "encryption.circom";
+include "elgamal.circom";
 
 template PolyEncryption(n, t) {
     // Public inputs
