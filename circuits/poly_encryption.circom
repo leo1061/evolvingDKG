@@ -24,30 +24,52 @@ template PolyEncryption(n, t) {
         16950150798460657717958625567821834550301663161624707787222815936182638968203
     ];
 
+    // Declare components outside loops
+    component encodeX[n];
+    component enc[n];
+    component evalAtZero;
+    component xBits[n];
+    component coeff0Bits;
+
+    // Initialize components
+    for (var i = 0; i < n; i++) {
+        xBits[i] = Num2Bits(250);
+        encodeX[i] = EscalarMulFix(250, base);
+        enc[i] = ElGamalEncrypt();
+    }
+    coeff0Bits = Num2Bits(250);
+    evalAtZero = EscalarMulFix(250, base);
+
     // Verify each encryption
     for (var i = 0; i < n; i++) {
+        // Convert x[i] to bits
+        xBits[i].in <== x[i];
         // Encode x[i] as a point on the curve
-        component encodeX = EscalarMulFix(250, base);
-        encodeX.e <== x[i];
+        for (var j = 0; j < 250; j++) {
+            encodeX[i].e[j] <== xBits[i].out[j];
+        }
         
         // Verify encryption using existing ElGamal circuit
-        component enc = ElGamalEncrypt();
-        enc.message[0] <== encodeX.out[0];
-        enc.message[1] <== encodeX.out[1];
-        enc.nonceKey <== omega[i];
-        enc.publicKey[0] <== publicKeys[i][0];
-        enc.publicKey[1] <== publicKeys[i][1];
+        enc[i].message[0] <== encodeX[i].out[0];
+        enc[i].message[1] <== encodeX[i].out[1];
+        enc[i].nonceKey <== omega[i];
+        enc[i].publicKey[0] <== publicKeys[i][0];
+        enc[i].publicKey[1] <== publicKeys[i][1];
         
         // Verify ciphertext matches
-        enc.ephemeralKey[0] === ciphertexts[i][0][0];
-        enc.ephemeralKey[1] === ciphertexts[i][0][1];
-        enc.encryptedMessage[0] === ciphertexts[i][1][0];
-        enc.encryptedMessage[1] === ciphertexts[i][1][1];
+        enc[i].ephemeralKey[0] === ciphertexts[i][0][0];
+        enc[i].ephemeralKey[1] === ciphertexts[i][0][1];
+        enc[i].encryptedMessage[0] === ciphertexts[i][1][0];
+        enc[i].encryptedMessage[1] === ciphertexts[i][1][1];
+    }
+
+    // Convert coeffs[0] to bits
+    coeff0Bits.in <== coeffs[0];
+    for (var j = 0; j < 250; j++) {
+        evalAtZero.e[j] <== coeff0Bits.out[j];
     }
 
     // Verify polynomial evaluation at 0 equals Y
-    component evalAtZero = EscalarMulFix(250, base);
-    evalAtZero.e <== coeffs[0];  // f(0) is just the constant term
     evalAtZero.out[0] === Y[0];
     evalAtZero.out[1] === Y[1];
 
@@ -64,6 +86,4 @@ template PolyEncryption(n, t) {
         // Verify evaluation matches x[i]
         eval === x[i];
     }
-}
-
-component main = PolyEncryption(3, 2);  // Example: 3 points, degree 2 polynomial 
+} 

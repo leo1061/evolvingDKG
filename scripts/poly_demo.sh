@@ -45,9 +45,9 @@ SK=$(cat bjj_sk.txt)
 PUBKEY=$(cat bjj_pk.txt | jq '[.[] | tonumber]')
 
 echo "2. Compiling circuits..."
-# Compile the poly_encryption circuit specifically
-circom circuits/poly_encryption.circom --r1cs --wasm --sym -o build -l node_modules
-cd build/poly_encryption_js
+# Compile the poly_encryption_main circuit
+circom circuits/poly_encryption_main.circom --r1cs --wasm --sym -o build -l node_modules
+cd build/poly_encryption_main_js
 npm install
 cd ../..
 
@@ -102,7 +102,7 @@ cat > build/input.json << EOF
     ],
     "ciphertexts": [
         [
-            [0, 0],  // Will be filled by encryption
+            [0, 0],
             [0, 0]
         ],
         [
@@ -114,7 +114,7 @@ cat > build/input.json << EOF
             [0, 0]
         ]
     ],
-    "Y": [0, 0],  // Will be filled with g^f(0)
+    "Y": [0, 0],
     "x": ["$X1", "$X2", "$X3"],
     "omega": ["$OMEGA1", "$OMEGA2", "$OMEGA3"],
     "coeffs": ["$COEFF0", "$COEFF1", "$COEFF2"]
@@ -122,8 +122,8 @@ cat > build/input.json << EOF
 EOF
 
 # Generate witness
-cd build/poly_encryption_js
-node generate_witness.js poly_encryption.wasm ../input.json ../witness.wtns
+cd build/poly_encryption_main_js
+node generate_witness.js poly_encryption_main.wasm ../input.json ../witness.wtns
 cd ../..
 
 # Generate zkey files
@@ -133,14 +133,14 @@ snarkjs powersoftau contribute build/pot12_0000.ptau build/pot12_0001.ptau --nam
 snarkjs powersoftau prepare phase2 build/pot12_0001.ptau build/pot12_final.ptau -v
 
 # Generate zkey files
-snarkjs groth16 setup build/poly_encryption.r1cs build/pot12_final.ptau build/poly_encryption_0000.zkey
-snarkjs zkey contribute build/poly_encryption_0000.zkey build/poly_encryption_0001.zkey --name="First contribution" --entropy="more random text" -v
-snarkjs zkey export verificationkey build/poly_encryption_0001.zkey build/verification_key.json
-cp build/poly_encryption_0001.zkey build/poly_encryption_final.zkey
+snarkjs groth16 setup build/poly_encryption_main.r1cs build/pot12_final.ptau build/poly_encryption_main_0000.zkey
+snarkjs zkey contribute build/poly_encryption_main_0000.zkey build/poly_encryption_main_0001.zkey --name="First contribution" --entropy="more random text" -v
+snarkjs zkey export verificationkey build/poly_encryption_main_0001.zkey build/verification_key.json
+cp build/poly_encryption_main_0001.zkey build/poly_encryption_main_final.zkey
 
 # 7. Generate proof
 echo -e "\n7. Generating proof..."
-snarkjs groth16 prove build/poly_encryption_final.zkey build/witness.wtns build/proof.json build/public.json
+snarkjs groth16 prove build/poly_encryption_main_final.zkey build/witness.wtns build/proof.json build/public.json
 
 # 8. Verify proof
 echo -e "\n8. Verifying proof..."
