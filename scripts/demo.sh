@@ -36,19 +36,15 @@ echo "====================="
 # cleanup
 mkdir -p build
 
-echo "1. Generating BabyJubJub keys..."
-node scripts/gen_bjj_keys.js
+echo "1. Generating keys..."
+# Use Rust keygen for BabyJubJub keys
+cd rust-keygen
+cargo run
+cd ..
 
-# Use BabyJubJub keys
+# Get the generated keys
 SK=$(cat bjj_sk.txt)
-# Parse public key as numbers (not strings)
 PUBKEY=$(cat bjj_pk.txt | jq '[.[] | tonumber]')
-
-# Optionally, keep the old Rust keygen for reference
-# echo "1. Generating keys..."
-# cd rust-keygen
-# cargo run --bin keygen
-# cd ..
 
 echo "2. Compiling circuits..."
 npm run compile-all

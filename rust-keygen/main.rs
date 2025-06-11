@@ -1,27 +1,37 @@
-use ark_bn254::{Fr, G1Projective};
-use ark_ec::{Group, CurveGroup};   // Changed PrimeGroup to Group
-use ark_ff::{UniformRand, PrimeField};   // ← PrimeField per into_bigint()
-use rand::thread_rng;
+use std::process::Command;
 use anyhow::Result;
-use std::fs::write;
+use std::path::Path;
+
+fn key_gen(i: u32) -> Result<()> {
+    println!("🔐 Generating BabyJubJub keys using Node.js script...");
+    
+    // Get the parent directory path
+    let parent_dir = Path::new("..");
+    
+    // Execute the Node.js script with the correct path
+    let output = Command::new("node")
+        .current_dir(parent_dir)  // Set working directory to parent
+        .arg("scripts/gen_bjj_keys.js")
+        .arg(i.to_string())
+        .output()?;
+
+    // Check if the command was successful
+    if !output.status.success() {
+        let error = String::from_utf8_lossy(&output.stderr);
+        anyhow::bail!("Failed to generate keys: {}", error);
+    }
+
+    // Print the output
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    println!("{}", stdout);
+
+    println!("✅ Key generation complete!");
+    Ok(())
+}
 
 fn main() -> Result<()> {
-    // 1) Genera sk ∈ Fr
-    let mut rng = thread_rng();
-    let sk: Fr = Fr::rand(&mut rng);
-
-    // 2) Public key = G * sk
-    let G = G1Projective::generator();  // This should work now with Group trait in scope
-    let pk_proj = G * sk;
-    let pk_aff = pk_proj.into_affine();    // ora disponibile
-
-    // 3) Serializza su file
-    write("../sk.txt", sk.into_bigint().to_string().as_bytes())?;                // ora disponibile
-    write(
-        "../pk.txt",
-        format!("{}\n{}\n", pk_aff.x.into_bigint(), pk_aff.y.into_bigint()).as_bytes(),
-    )?;
-
-    println!("Key generation complete → ../sk.txt, ../pk.txt");
+    key_gen(0)?;
+    key_gen(1)?;
+    key_gen(2)?;
     Ok(())
 }

@@ -5,8 +5,11 @@ async function encodeMessage(message) {
   // Initialize BabyJubJub curve
   const babyjub = await circomlibjs.buildBabyjub();
 
-  // Use a small scalar to ensure we get a valid point
-  const scalar = BigInt(message) % babyjub.subOrder;
+  // Convert message to a number and ensure it's within the field range
+  const fieldSize = BigInt(
+    "21888242871839275222246405745257275088548364400416034343698204186575808495617"
+  );
+  const scalar = BigInt(message) % fieldSize;
 
   // Use the base point to generate a point on the curve
   const point = babyjub.mulPointEscalar(babyjub.Base8, scalar);

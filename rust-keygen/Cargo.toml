@@ -8,7 +8,7 @@ name = "keygen"
 path = "main.rs"
 
 [dependencies]
-ark-bn254 = "0.4"
+ark-ed-on-bn254 = "0.4"
 ark-ec = "0.4"
 ark-ff = "0.4"
 rand = "0.8"
