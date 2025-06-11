@@ -80,4 +80,4 @@ template ElGamalEncrypt() {
     encryptedMessage[1] <== addPoints.yout;
 }
 
-component main = ElGamalEncrypt();
+component main = ElGamalEncrypt(); 
