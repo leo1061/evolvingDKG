@@ -3,6 +3,10 @@ use anyhow::Result;
 use num_bigint::BigUint;
 use serde::{Deserialize, Serialize};
 use serde_json;
+use dusk_jubjub::{JubJubScalar, JubJubExtended};
+
+pub mod elgamal;
+use elgamal::ElGamalCiphertext;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BabyJubJubPK {
@@ -20,8 +24,7 @@ pub struct Share {
     pub sk: BabyJubJubSK,
     pub pk: BabyJubJubPK,
     pub share: BigUint,
-    // pub encr_share: BigUint,
-    //TODO: add encrypted shares to the struct
+    pub encr_share: Option<ElGamalCiphertext>,  // Encrypted share using ElGamal
 }
 
 impl Share {
@@ -29,12 +32,17 @@ impl Share {
         Self {
             sk,
             pk,
-            share: BigUint::from(0u32), // Initialize share as 0, will be set later
+            share: BigUint::from(0u32),
+            encr_share: None,
         }
     }
 
     pub fn set_share(&mut self, share: BigUint) {
         self.share = share;
+    }
+
+    pub fn set_encrypted_share(&mut self, encr_share: ElGamalCiphertext) {
+        self.encr_share = Some(encr_share);
     }
 }
 

@@ -1,24 +1,28 @@
 [package]
-name = "elgamal-keygen"
+name = "evolvingDKG"
 version = "0.1.0"
 edition = "2021"
 
 [lib]
-name = "elgamal_keygen"
+name = "evolvingDKG"
 path = "src/lib.rs"
 
-[[bin]]
-name = "keygen"
-path = "main.rs"
+
+
+
 
 [dependencies]
 ark-ed-on-bn254 = "0.5.0"
 ark-ec = "0.5.0"
 ark-ff = "0.5.0"
-rand = "0.9.1"
+rand = "0.8.5"
+rand_core = "0.6.4"
 anyhow = "1.0"
 shamir-rs = "0.1.0"
 num-bigint = { version = "0.4", features = ["serde"] }
 serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"  
+serde_json = "1.0"
+jubjub-elgamal = "0.4.3"
+dusk-jubjub = "0.15.0"
+ff = "0.13.0"  
 
