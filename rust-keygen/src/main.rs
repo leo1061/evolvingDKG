@@ -2,40 +2,68 @@ use anyhow::Result;
 use num_bigint::BigUint;
 use shamir_rs::Scheme;
 use elgamal_keygen::{key_gen, read_keys, Party};
+use std::str::FromStr;
 
 fn main() -> Result<()> {
-    let n = 5; // total number of initial parties
-    let t = 3; // initial threshold
+    // Protocol parameters
+    let n = 5; // total number of parties
+    let t = 3; // threshold for reconstruction
     
+    println!("Initializing Shamir Secret Sharing Protocol");
+    println!("Total parties: {}", n);
+    println!("Threshold: {}", t);
+    
+    // Generate keys for each party
+    let mut parties = Vec::new();
+    println!("\nGenerating keys for each party...");
     for i in 0..n {
+        println!("Generating keys for party {}", i);
         key_gen(i)?;
         let (sk, pk) = read_keys(i);
         let party = Party::new(i, sk, pk)?;
-        println!("{}", party);
+        parties.push(party);
     }
 
-    // Choose a prime larger than the secret and total shares
-    let prime = BigUint::from(257u32);
-    // TODO: put a bigger prime
+    // Choose a large prime for the field
+    // Using a 128-bit prime for better security
+    let prime = BigUint::from_str("340282366920938463463374607431768211297")?;
+    println!("\nUsing prime field of size: {}", prime);
     
-    // Create a new scheme with a minimum threshold of 3 shares to reconstruct, and 5 shares total
-    let scheme = Scheme::new(t as usize, n as usize, prime).unwrap();
-
-    // The secret to be shared    
-    let secret = BigUint::from(123u32);
-    // TODO: put a bigger secret
-
-    // Split the secret into shares    
+    // Create the Shamir scheme
+    let scheme = Scheme::new(t as usize, n as usize, prime.clone())?;
+    
+    // Generate a random secret (in practice, this would be your actual secret)
+    // Using a 64-bit random number for demonstration
+    let secret = BigUint::from_str("12345678901234567890")?;
+    println!("\nOriginal secret: {}", secret);
+    
+    // Split the secret into shares
+    println!("\nSplitting secret into shares...");
     let shares = scheme.split_secret(&secret);
-
+    
+    // Distribute shares to parties
+    println!("\nDistributing shares to parties:");
     for i in 0..n {
-        println!("Share {} has value {}", i, shares[i as usize].value)
+        parties[i as usize].set_share(shares[i as usize].value.clone());
+        println!("Party {} received share: {}", i, shares[i as usize].value);
     }
-
-    // Reconstruct the secret from a subset of shares
-    let reconstructed = scheme.reconstruct_secret(&shares[0..3]).unwrap();
-    assert_eq!(reconstructed, secret);
-
+    
+    // Demonstrate reconstruction with threshold number of shares
+    println!("\nReconstructing secret using {} shares...", t);
+    let reconstructed = scheme.reconstruct_secret(&shares[0..t as usize])?;
+    println!("Reconstructed secret: {}", reconstructed);
+    
+    // Verify the reconstruction
+    assert_eq!(reconstructed, secret, "Secret reconstruction failed!");
+    println!("\n✅ Secret successfully reconstructed!");
+    
+    // Demonstrate that fewer than threshold shares cannot reconstruct
+    println!("\nAttempting reconstruction with {} shares (should fail)...", t-1);
+    match scheme.reconstruct_secret(&shares[0..(t-1) as usize]) {
+        Ok(_) => println!("❌ Error: Reconstruction succeeded with insufficient shares!"),
+        Err(_) => println!("✅ Correct: Reconstruction failed with insufficient shares"),
+    }
+    
     Ok(())
 }
 
