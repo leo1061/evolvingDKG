@@ -7,7 +7,7 @@ cleanup() {
     echo "🧹 Cleaning up build artifacts..."
     rm -rf build
     mkdir -p build
-    rm -f bjj_sk.txt bjj_pk.txt
+    rm -f bjj_sk*.txt bjj_pk*.txt
     rm -f *.wtns
     if [ -f "package.json" ]; then
         mv package.json package.json.tmp
@@ -37,14 +37,12 @@ echo "====================="
 mkdir -p build
 
 echo "1. Generating keys..."
-# Use Rust keygen for BabyJubJub keys
-cd rust-keygen
-cargo run
-cd ..
+# Use Node.js for BabyJubJub key generation
+node scripts/gen_bjj_keys.js
 
 # Get the generated keys
 SK=$(cat bjj_sk.txt)
-PUBKEY=$(cat bjj_pk.txt | jq '[.[] | tonumber]')
+PUBKEY=$(cat bjj_pk.txt)
 
 echo "2. Compiling circuits..."
 npm run compile-all
@@ -76,10 +74,10 @@ fi
 # 5. Encrypt message
 MSG=123
 echo -e "\n5. Encrypting message $MSG..."
-# Encode message as a BabyJubJub point and ensure it's a proper number array
-ENCODED_MSG=$(node scripts/encode_message.js $MSG | grep -o '\[.*\]' | jq '[.[] | tonumber]')
+# Encode message as a BabyJubJub point
+ENCODED_MSG=$(node scripts/encode_message.js $MSG)
 
-# Generate a random nonce key that's within the field range using BigInt
+# Generate a random nonce key that's within the field range using Node.js
 NONCE_KEY=$(node -e "
 const fieldSize = BigInt('21888242871839275222246405745257275088548364400416034343698204186575808495617');
 const randomBytes = require('crypto').randomBytes(10);
@@ -88,13 +86,11 @@ console.log((randomBigInt % fieldSize).toString());
 ")
 
 # Create input.json for the circuit
-cat > build/input.json << EOF
-{
-    "message": $(echo $ENCODED_MSG | jq '[.[] | tostring]'),
-    "nonceKey": "$NONCE_KEY",
-    "publicKey": $(echo $PUBKEY | jq '[.[] | tostring]')
-}
-EOF
+echo "{
+    \"message\": $ENCODED_MSG,
+    \"nonceKey\": \"$NONCE_KEY\",
+    \"publicKey\": $PUBKEY
+}" > build/input.json
 
 # Generate witness
 cd build/encryption_js
@@ -103,7 +99,6 @@ cd ../..
 
 # Generate zkey files
 echo -e "\n6. Generating zkey files..."
-# snarkjs powersoftau new bn128 12 build/pot12_0000.ptau -v
 snarkjs powersoftau new bn128 14 build/pot12_0000.ptau -v
 
 snarkjs powersoftau contribute build/pot12_0000.ptau build/pot12_0001.ptau --name="First contribution" --entropy="some random text here" -v
@@ -120,6 +115,7 @@ snarkjs groth16 setup build/decryption.r1cs build/pot12_final.ptau build/decrypt
 snarkjs zkey contribute build/decryption_0000.zkey build/decryption_0001.zkey --name="First contribution" --entropy="even more random text" -v
 snarkjs zkey export verificationkey build/decryption_0001.zkey build/decrypt_verification_key.json
 cp build/decryption_0001.zkey build/decryption_final.zkey
+
 # 7. Generate proof
 echo -e "\n7. Generating proof..."
 snarkjs groth16 prove build/encryption_final.zkey build/witness.wtns build/proof.json build/public.json
@@ -156,6 +152,4 @@ snarkjs groth16 prove build/decryption_final.zkey build/decrypt_witness.wtns bui
 snarkjs groth16 verify build/decrypt_verification_key.json build/decrypt_public.json build/decrypt_proof.json
 
 echo -e "\nDemo completed successfully!"
-
-
 echo -e "\n✨ All done! Build artifacts are preserved in the build directory."

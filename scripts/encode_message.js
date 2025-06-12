@@ -18,10 +18,6 @@ async function encodeMessage(message) {
   const x = babyjub.F.toObject(point[0]).toString();
   const y = babyjub.F.toObject(point[1]).toString();
 
-  console.log("Message:", message);
-  console.log("Scalar:", scalar.toString());
-  console.log("Generated point:", [x, y]);
-
   // Verify the point is on the curve
   if (!babyjub.inCurve(point)) {
     throw new Error("Generated point is not on the curve");
@@ -40,12 +36,8 @@ if (!message) {
 // Run the async function
 encodeMessage(message)
   .then((encodedPoint) => {
-    // Ensure the output is valid JSON with numbers
-    const output = JSON.stringify(encodedPoint);
-    if (!output) {
-      throw new Error("Failed to stringify encoded point");
-    }
-    console.log(output);
+    // Output only the JSON array
+    console.log(JSON.stringify(encodedPoint));
   })
   .catch((error) => {
     console.error("Error encoding message:", error);
