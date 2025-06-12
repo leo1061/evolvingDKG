@@ -3,15 +3,19 @@ name = "elgamal-keygen"
 version = "0.1.0"
 edition = "2021"
 
+[lib]
+name = "elgamal_keygen"
+path = "src/lib.rs"
+
 [[bin]]
 name = "keygen"
 path = "main.rs"
 
 [dependencies]
-ark-ed-on-bn254 = "0.4"
-ark-ec = "0.4"
-ark-ff = "0.4"
-rand = "0.8"
+ark-ed-on-bn254 = "0.5.0"
+ark-ec = "0.5.0"
+ark-ff = "0.5.0"
+rand = "0.9.1"
 anyhow = "1.0"
 shamir-rs = "0.1.0"
 num-bigint = { version = "0.4", features = ["serde"] }

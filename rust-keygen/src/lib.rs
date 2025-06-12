@@ -1,7 +1,6 @@
-use std::{env, fs, path::Path, process::Command, str::FromStr, fmt};
+use std::{fs, path::Path, process::Command, str::FromStr, fmt};
 use anyhow::Result;
 use num_bigint::BigUint;
-use shamir_rs::Scheme;
 use serde::{Deserialize, Serialize};
 use serde_json;
 
@@ -16,42 +15,62 @@ pub struct BabyJubJubSK {
     pub value: BigUint,
 }
 
-struct Party {
-    index: u32,
-    sk: BabyJubJubSK,
-    pk: BabyJubJubPK,
-    share: BigUint,
-    //encr_shares: 
-    //TODO: add exncrypted shares to the struct
-
+pub struct Share {
+    pub sk: BabyJubJubSK,
+    pub pk: BabyJubJubPK,
+    pub share: BigUint,
+    // pub encr_share: BigUint,
+    //TODO: add encrypted shares to the struct
 }
 
-impl Party {
-    fn new(i: u32, sk: BabyJubJubSK, pk: BabyJubJubPK) -> Result<Self> {
-        Ok(Self {
-            index: i,
+impl Share {
+    pub fn new(sk: BabyJubJubSK, pk: BabyJubJubPK) -> Self {
+        Self {
             sk,
             pk,
             share: BigUint::from(0u32), // Initialize share as 0, will be set later
-        })
+        }
     }
 
-    fn set_share(&mut self, share: BigUint) {
+    pub fn set_share(&mut self, share: BigUint) {
         self.share = share;
     }
 }
 
-impl fmt::Display for Party {
+impl fmt::Display for Share {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "Party {}:", self.index)?;
         writeln!(f, "  Secret Key: {}", self.sk.value)?;
         writeln!(f, "  Public Key: ({}, {})", self.pk.x, self.pk.y)?;
         writeln!(f, "  Share: {}", self.share)
     }
 }
 
-fn key_gen(i: u32) -> Result<()> {
-    
+pub struct Party {
+    pub index: u32,
+    pub share: Share,   
+}
+
+impl Party {
+    pub fn new(i: u32, sk: BabyJubJubSK, pk: BabyJubJubPK) -> Result<Self> {
+        Ok(Self {
+            index: i,
+            share: Share::new(sk, pk),
+        })
+    }
+
+    pub fn set_share(&mut self, share: BigUint) {
+        self.share.set_share(share);
+    }
+}
+
+impl fmt::Display for Party {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "Party {}:", self.index)?;
+        write!(f, "{}", self.share)
+    }
+}
+
+pub fn key_gen(i: u32) -> Result<()> {
     // Get the parent directory path
     let parent_dir = Path::new("..");
     
@@ -71,7 +90,7 @@ fn key_gen(i: u32) -> Result<()> {
     Ok(())
 }
 
-fn read_keys(i: u32) -> (BabyJubJubSK, BabyJubJubPK) {
+pub fn read_keys(i: u32) -> (BabyJubJubSK, BabyJubJubPK) {
     let sk_file_path = format!("../bjj_sk_{}.txt", i);
     let sk_contents = fs::read_to_string(sk_file_path)
         .expect("Should have been able to read the file");
@@ -91,49 +110,5 @@ fn read_keys(i: u32) -> (BabyJubJubSK, BabyJubJubPK) {
         y: BigUint::from_str(&pk_array[1]).unwrap()
     };
 
-    // println!("SK: {}", sk.value);
-    // println!("PK: ({}, {})", pk.x, pk.y);
-
     (sk, pk)
-}
-
-
-fn main() -> Result<()> {
-    let n = 5; // total number of initial parties
-    let t = 3; // initial threshold
-    
-    for i in 0..n {
-        key_gen(i)?;
-        let (sk, pk) = read_keys(i);
-        let party = Party::new(i, sk, pk)?;
-        println!("{}", party);
-    }
-
-
-    // Choose a prime larger than the secret and total shares
-    let prime = BigUint::from(257u32);
-    // TODO: put a bigger prime
-    
-    // Create a new scheme with a minimum threshold of 3 shares to reconstruct, and 5 shares total
-    let scheme = Scheme::new(t as usize, n as usize, prime).unwrap();
-
-    // The secret to be shared    
-    let secret = BigUint::from(123u32);
-    // TODO: put a bigger secret
-
-    // Split the secret into shares    
-    let shares = scheme.split_secret(&secret);
-
-    for i in 0..n {
-        println!("Share {} has value {}", i  , shares[i as usize].value )
-    }
-
-
-
-    // Reconstruct the secret from a subset of shares
-    let reconstructed = scheme.reconstruct_secret(&shares[0..3]).unwrap();
-    assert_eq!(reconstructed, secret);
-
-    Ok(())
-}
-
+} 
