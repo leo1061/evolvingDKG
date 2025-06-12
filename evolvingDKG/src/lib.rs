@@ -4,6 +4,7 @@ use num_bigint::BigUint;
 use serde::{Deserialize, Serialize};
 use serde_json;
 use dusk_jubjub::{JubJubScalar, JubJubExtended};
+use group::GroupEncoding;
 
 pub mod elgamal;
 use elgamal::ElGamalCiphertext;
@@ -14,9 +15,46 @@ pub struct BabyJubJubPK {
     pub y: BigUint,
 }
 
+impl From<JubJubExtended> for BabyJubJubPK {
+    fn from(pk: JubJubExtended) -> Self {
+        let bytes = pk.to_bytes();
+        // The bytes represent the x-coordinate in compressed format
+        Self {
+            x: BigUint::from_bytes_le(&bytes),
+            y: BigUint::from(0u32), // We can't recover y from compressed format
+        }
+    }
+}
+
+impl From<BabyJubJubPK> for JubJubExtended {
+    fn from(pk: BabyJubJubPK) -> Self {
+        let mut bytes = [0u8; 32];
+        let x_bytes = pk.x.to_bytes_le();
+        bytes[0..x_bytes.len()].copy_from_slice(&x_bytes);
+        JubJubExtended::from_bytes(&bytes).unwrap()
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct BabyJubJubSK {
     pub value: BigUint,
+}
+
+impl From<JubJubScalar> for BabyJubJubSK {
+    fn from(sk: JubJubScalar) -> Self {
+        Self {
+            value: BigUint::from_bytes_le(&sk.to_bytes()),
+        }
+    }
+}
+
+impl From<BabyJubJubSK> for JubJubScalar {
+    fn from(sk: BabyJubJubSK) -> Self {
+        let mut bytes = [0u8; 32];
+        let sk_bytes = sk.value.to_bytes_le();
+        bytes[0..sk_bytes.len()].copy_from_slice(&sk_bytes);
+        JubJubScalar::from_bytes(&bytes).unwrap()
+    }
 }
 
 #[derive(Debug)]
@@ -136,4 +174,104 @@ pub fn read_keys(i: u32) -> (BabyJubJubSK, BabyJubJubPK) {
     };
 
     (sk, pk)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use dusk_jubjub::GENERATOR_EXTENDED;
+    use rand::rngs::StdRng;
+    use rand::SeedableRng;
+    use ff::Field;
+
+    #[test]
+    fn test_pk_conversion_roundtrip() {
+        let mut rng = StdRng::seed_from_u64(0x123);
+        
+        // Generate a random JubJub public key
+        let sk = JubJubScalar::random(&mut rng);
+        let jubjub_pk = GENERATOR_EXTENDED * &sk;
+        
+        // Convert to BabyJubJub and back
+        let babyjub_pk: BabyJubJubPK = jubjub_pk.into();
+        let jubjub_pk_again: JubJubExtended = babyjub_pk.into();
+        
+        // Verify the roundtrip conversion
+        assert_eq!(jubjub_pk, jubjub_pk_again);
+    }
+
+    #[test]
+    fn test_sk_conversion_roundtrip() {
+        let mut rng = StdRng::seed_from_u64(0x456);
+        
+        // Generate a random JubJub scalar
+        let jubjub_sk = JubJubScalar::random(&mut rng);
+        
+        // Convert to BabyJubJub and back
+        let babyjub_sk: BabyJubJubSK = jubjub_sk.into();
+        let jubjub_sk_again: JubJubScalar = babyjub_sk.into();
+        
+        // Verify the roundtrip conversion
+        assert_eq!(jubjub_sk, jubjub_sk_again);
+    }
+
+    #[test]
+    fn test_keypair_consistency() {
+        let mut rng = StdRng::seed_from_u64(0x789);
+        
+        // Generate a keypair using JubJub
+        let jubjub_sk = JubJubScalar::random(&mut rng);
+        let jubjub_pk = GENERATOR_EXTENDED * &jubjub_sk;
+        
+        // Convert to BabyJubJub format
+        let babyjub_sk: BabyJubJubSK = jubjub_sk.into();
+        let babyjub_pk: BabyJubJubPK = jubjub_pk.into();
+        
+        // Convert back to JubJub
+        let jubjub_sk_again: JubJubScalar = babyjub_sk.into();
+        let jubjub_pk_again: JubJubExtended = babyjub_pk.into();
+        
+        // Verify the keypair relationship is maintained
+        let expected_pk = GENERATOR_EXTENDED * &jubjub_sk_again;
+        assert_eq!(jubjub_pk_again, expected_pk);
+    }
+
+    #[test]
+    fn test_multiple_conversions() {
+        let mut rng = StdRng::seed_from_u64(0xabc);
+        
+        // Test multiple random keypairs
+        for _ in 0..10 {
+            let jubjub_sk = JubJubScalar::random(&mut rng);
+            let jubjub_pk = GENERATOR_EXTENDED * &jubjub_sk;
+            
+            let babyjub_sk: BabyJubJubSK = jubjub_sk.into();
+            let babyjub_pk: BabyJubJubPK = jubjub_pk.into();
+            
+            let jubjub_sk_again: JubJubScalar = babyjub_sk.into();
+            let jubjub_pk_again: JubJubExtended = babyjub_pk.into();
+            
+            assert_eq!(jubjub_sk, jubjub_sk_again);
+            assert_eq!(jubjub_pk, jubjub_pk_again);
+            
+            // Verify the keypair relationship
+            let expected_pk = GENERATOR_EXTENDED * &jubjub_sk_again;
+            assert_eq!(jubjub_pk_again, expected_pk);
+        }
+    }
+
+    #[test]
+    fn test_edge_cases() {
+        // Test zero scalar
+        let zero_scalar = JubJubScalar::zero();
+        let babyjub_sk: BabyJubJubSK = zero_scalar.into();
+        let jubjub_sk_again: JubJubScalar = babyjub_sk.into();
+        assert_eq!(zero_scalar, jubjub_sk_again);
+        
+        // Test identity point
+        let identity = JubJubExtended::default();
+        let babyjub_pk: BabyJubJubPK = identity.into();
+        let jubjub_pk_again: JubJubExtended = babyjub_pk.into();
+        assert_eq!(identity, jubjub_pk_again);
+    }
 } 
