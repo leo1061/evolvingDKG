@@ -1,21 +1,56 @@
-use std::{env, fs, path::Path, process::Command};
+use std::{env, fs, path::Path, process::Command, str::FromStr, fmt};
 use anyhow::Result;
 use num_bigint::BigUint;
 use shamir_rs::Scheme;
+use serde::{Deserialize, Serialize};
+use serde_json;
 
-// struct Party {
-//     index: u32,
-//     sk: ,
-//     pk: ,
-//     share: BigUint,
-//     //encr_shares: 
-//     //TODO: add exncrypted shares to the struct
-//
-// }
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BabyJubJubPK {
+    pub x: BigUint,
+    pub y: BigUint,
+}
 
+#[derive(Debug, Clone)]
+pub struct BabyJubJubSK {
+    pub value: BigUint,
+}
+
+struct Party {
+    index: u32,
+    sk: BabyJubJubSK,
+    pk: BabyJubJubPK,
+    share: BigUint,
+    //encr_shares: 
+    //TODO: add exncrypted shares to the struct
+
+}
+
+impl Party {
+    fn new(i: u32, sk: BabyJubJubSK, pk: BabyJubJubPK) -> Result<Self> {
+        Ok(Self {
+            index: i,
+            sk,
+            pk,
+            share: BigUint::from(0u32), // Initialize share as 0, will be set later
+        })
+    }
+
+    fn set_share(&mut self, share: BigUint) {
+        self.share = share;
+    }
+}
+
+impl fmt::Display for Party {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "Party {}:", self.index)?;
+        writeln!(f, "  Secret Key: {}", self.sk.value)?;
+        writeln!(f, "  Public Key: ({}, {})", self.pk.x, self.pk.y)?;
+        writeln!(f, "  Share: {}", self.share)
+    }
+}
 
 fn key_gen(i: u32) -> Result<()> {
-    println!("🔐 Generating BabyJubJub keys using Node.js script...");
     
     // Get the parent directory path
     let parent_dir = Path::new("..");
@@ -33,28 +68,34 @@ fn key_gen(i: u32) -> Result<()> {
         anyhow::bail!("Failed to generate keys: {}", error);
     }
 
-    // Print the output
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    println!("{}", stdout);
-
-    println!("✅ Key generation complete!");
     Ok(())
 }
 
-// fn read_keys(P: Party){
-//     let i = P.index;
-//
-//     let sk_file_path = concat("../bjj_sk_", i.to_string(), ".txt" );
-//     // let pk_file_path = concat(,i.to_string());
-//
-//
-//     let sk_contents = fs::read_to_string(file_path)
-//         .expect("Should have been able to read the file");
-//
-//     let sk = BigUint::
-//
-//
-// }(<>)
+fn read_keys(i: u32) -> (BabyJubJubSK, BabyJubJubPK) {
+    let sk_file_path = format!("../bjj_sk_{}.txt", i);
+    let sk_contents = fs::read_to_string(sk_file_path)
+        .expect("Should have been able to read the file");
+    let sk = BabyJubJubSK {
+        value: BigUint::from_str(&sk_contents).unwrap()
+    };
+
+    let pk_file_path = format!("../bjj_pk_{}.txt", i);
+    let pk_contents = fs::read_to_string(pk_file_path)
+        .expect("Should have been able to read the file");
+    
+    let pk_array: Vec<String> = serde_json::from_str(&pk_contents)
+        .expect("Failed to parse public key array");
+    
+    let pk = BabyJubJubPK {
+        x: BigUint::from_str(&pk_array[0]).unwrap(),
+        y: BigUint::from_str(&pk_array[1]).unwrap()
+    };
+
+    // println!("SK: {}", sk.value);
+    // println!("PK: ({}, {})", pk.x, pk.y);
+
+    (sk, pk)
+}
 
 
 fn main() -> Result<()> {
@@ -63,6 +104,9 @@ fn main() -> Result<()> {
     
     for i in 0..n {
         key_gen(i)?;
+        let (sk, pk) = read_keys(i);
+        let party = Party::new(i, sk, pk)?;
+        println!("{}", party);
     }
 
 

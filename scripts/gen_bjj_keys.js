@@ -32,11 +32,11 @@ async function generateBJJKeys(index = null) {
   ]);
   fs.writeFileSync(pkFilename, pubkeyJson);
 
-  console.log(`BabyJubJub Private key written to ${skFilename}`);
-  console.log(`BabyJubJub Public key written to ${pkFilename}`);
-  console.log("Private key:", prv.toString());
-  console.log("Public key:", pubkeyJson);
-  console.log("Public key is on curve:", babyjub.inCurve(pub));
+  // console.log(`BabyJubJub Private key written to ${skFilename}`);
+  // console.log(`BabyJubJub Public key written to ${pkFilename}`);
+  // console.log("Private key:", prv.toString());
+  // console.log("Public key:", pubkeyJson);
+  // console.log("Public key is on curve:", babyjub.inCurve(pub));
 
   return { privateKey: prv.toString(), publicKey: pubkeyJson };
 }
