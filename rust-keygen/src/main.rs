@@ -1,7 +1,7 @@
 use anyhow::Result;
 use num_bigint::BigUint;
 use shamir_rs::Scheme;
-use elgamal_keygen::{key_gen, read_keys, Party};
+use elgamal_keygen::{key_gen, read_keys, Party, PartyList};
 use std::str::FromStr;
 
 fn main() -> Result<()> {
@@ -64,6 +64,7 @@ fn main() -> Result<()> {
         Err(_) => println!("✅ Correct: Reconstruction failed with insufficient shares"),
     }
     
+    println!("Current state of all parties: {}", PartyList(parties));
     Ok(())
 }
 

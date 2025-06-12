@@ -15,6 +15,7 @@ pub struct BabyJubJubSK {
     pub value: BigUint,
 }
 
+#[derive(Debug)]
 pub struct Share {
     pub sk: BabyJubJubSK,
     pub pk: BabyJubJubPK,
@@ -45,6 +46,7 @@ impl fmt::Display for Share {
     }
 }
 
+#[derive(Debug)]
 pub struct Party {
     pub index: u32,
     pub share: Share,   
@@ -67,6 +69,21 @@ impl fmt::Display for Party {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(f, "Party {}:", self.index)?;
         write!(f, "{}", self.share)
+    }
+}
+
+// Wrapper type for Vec<Party>
+pub struct PartyList(pub Vec<Party>);
+
+impl fmt::Display for PartyList {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "\nAll Parties:")?;
+        writeln!(f, "{}", "=".repeat(50))?;
+        for party in &self.0 {
+            writeln!(f, "{}", party)?;
+            writeln!(f, "{}", "-".repeat(50))?;
+        }
+        Ok(())
     }
 }
 
