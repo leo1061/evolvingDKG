@@ -145,6 +145,10 @@ impl PKI {
     pub fn add_public_key(&mut self, pk: BabyJubJubPK) {
         self.keys.push(pk);
     }
+    
+    pub fn get_public_key(&self, index: usize) -> Option<&BabyJubJubPK> {
+        self.keys.get(index)
+    }
 }
 
 impl fmt::Display for BabyJubJubPK {
@@ -303,5 +307,70 @@ mod tests {
         let babyjub_pk: BabyJubJubPK = identity.into();
         let jubjub_pk_again: JubJubExtended = babyjub_pk.into();
         assert_eq!(identity, jubjub_pk_again);
+    }
+
+    #[test]
+    fn test_pki_initialization() {
+        let pki = PKI::new();
+        assert_eq!(pki.keys.len(), 0);
+    }
+
+    #[test]
+    fn test_pki_add_and_get_keys() {
+        let mut pki = PKI::new();
+        let mut rng = StdRng::seed_from_u64(0xdef);
+
+        // Generate and add some test keys
+        for _ in 0..3 {
+            let sk = JubJubScalar::random(&mut rng);
+            let jubjub_pk = GENERATOR_EXTENDED * &sk;
+            let babyjub_pk: BabyJubJubPK = jubjub_pk.into();
+            pki.add_public_key(babyjub_pk);
+        }
+
+        // Verify the number of keys
+        assert_eq!(pki.keys.len(), 3);
+
+        // Test retrieving keys
+        assert!(pki.get_public_key(0).is_some());
+        assert!(pki.get_public_key(1).is_some());
+        assert!(pki.get_public_key(2).is_some());
+        assert!(pki.get_public_key(3).is_none()); // Out of bounds
+    }
+
+    #[test]
+    fn test_pki_key_consistency() {
+        let mut pki = PKI::new();
+        let mut rng = StdRng::seed_from_u64(0x123);
+
+        // Generate a keypair
+        let sk = JubJubScalar::random(&mut rng);
+        let jubjub_pk = GENERATOR_EXTENDED * &sk;
+        let babyjub_pk: BabyJubJubPK = jubjub_pk.into();
+
+        // Add the public key to PKI
+        pki.add_public_key(babyjub_pk.clone());
+
+        // Retrieve and verify the key
+        let retrieved_pk = pki.get_public_key(0).unwrap();
+        assert_eq!(retrieved_pk.x, babyjub_pk.x);
+        assert_eq!(retrieved_pk.y, babyjub_pk.y);
+    }
+
+    #[test]
+    fn test_pki_display() {
+        let mut pki = PKI::new();
+        let mut rng = StdRng::seed_from_u64(0x456);
+
+        // Add a test key
+        let sk = JubJubScalar::random(&mut rng);
+        let jubjub_pk = GENERATOR_EXTENDED * &sk;
+        let babyjub_pk: BabyJubJubPK = jubjub_pk.into();
+        pki.add_public_key(babyjub_pk);
+
+        // Test the Display implementation
+        let display_output = format!("{}", pki);
+        assert!(display_output.contains("PKI contains 1 keys"));
+        assert!(display_output.contains("Key 0:"));
     }
 } 
