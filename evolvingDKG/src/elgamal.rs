@@ -126,4 +126,38 @@ mod tests {
         assert_ne!(ciphertext.c1, JubJubExtended::default());
         assert_ne!(ciphertext.c2, JubJubExtended::default());
     }
+
+    #[test]
+    fn test_homomorphic_addition() {
+        let mut rng = StdRng::seed_from_u64(0xabc);
+        let (sk, pk) = generate_keypair(&mut rng);
+        
+        // Create two test messages
+        let message1 = GENERATOR_EXTENDED * JubJubScalar::from(100u64);
+        let message2 = GENERATOR_EXTENDED * JubJubScalar::from(200u64);
+        
+        // Encrypt each message separately
+        let ciphertext1 = encrypt(&pk, &message1, &mut rng).unwrap();
+        let ciphertext2 = encrypt(&pk, &message2, &mut rng).unwrap();
+        
+        // Add the ciphertexts together
+        let sum_ciphertext = ElGamalCiphertext::new(
+            ciphertext1.c1 + ciphertext2.c1,
+            ciphertext1.c2 + ciphertext2.c2
+        );
+        
+        // Add the original messages and encrypt the sum
+        let sum_message = message1 + message2;
+        let encrypted_sum = encrypt(&pk, &sum_message, &mut rng).unwrap();
+        
+        // Decrypt both results
+        let decrypted_sum_ciphertext = sum_ciphertext.decrypt(&sk);
+        let decrypted_encrypted_sum = encrypted_sum.decrypt(&sk);
+        
+        // Verify that both decryptions give the same result
+        assert_eq!(decrypted_sum_ciphertext, decrypted_encrypted_sum);
+        
+        // Also verify that the decrypted result equals the sum of original messages
+        assert_eq!(decrypted_sum_ciphertext, sum_message);
+    }
 } 
