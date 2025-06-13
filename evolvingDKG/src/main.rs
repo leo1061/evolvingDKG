@@ -1,7 +1,7 @@
 use anyhow::Result;
 use num_bigint::BigUint;
 use shamir_rs::Scheme;
-use evolvingDKG::{key_gen, read_keys, Party, PartyList};
+use evolvingDKG::{key_gen, read_keys, Party, PartyList, PKI};
 use std::str::FromStr;
 
 fn main() -> Result<()> {
@@ -23,6 +23,14 @@ fn main() -> Result<()> {
         let party = Party::new(i, sk, pk)?;
         parties.push(party);
     }
+
+    // Add all public keys to a PKI. 
+    let mut pki = PKI::new();
+    for party in &parties {
+        pki.add_public_key(party.share.pk.clone());
+    }
+
+    println!("Current state of PKI: {}", pki);
 
     // Choose a large prime for the field
     // Using a 128-bit prime for better security

@@ -133,6 +133,36 @@ impl fmt::Display for PartyList {
     }
 }
 
+pub struct PKI {
+    pub keys: Vec<BabyJubJubPK>,
+}
+
+impl PKI {
+    pub fn new() -> Self {
+        Self { keys: Vec::new() }
+    }
+
+    pub fn add_public_key(&mut self, pk: BabyJubJubPK) {
+        self.keys.push(pk);
+    }
+}
+
+impl fmt::Display for BabyJubJubPK {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "({}, {})", self.x, self.y)
+    }
+}
+
+impl fmt::Display for PKI {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "PKI contains {} keys", self.keys.len())?;
+        for (i, pk) in self.keys.iter().enumerate() {
+            writeln!(f, "Key {}: {}", i, pk)?;
+        }
+        Ok(())
+    }
+}
+
 pub fn key_gen(i: u32) -> Result<()> {
     // Get the parent directory path
     let parent_dir = Path::new("..");
