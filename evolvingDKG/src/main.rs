@@ -1,7 +1,7 @@
 use anyhow::Result;
 use num_bigint::BigUint;
 use shamir_rs::Scheme;
-use evolvingDKG::{key_gen, read_keys, Party, PartyList, PKI};
+use evolvingDKG::{key_gen, read_keys, Party, PartyList, PKI, setup_zk::CircuitSetup, circom_encryption::EncryptionCircuit};
 use std::str::FromStr;
 
 fn main() -> Result<()> {
@@ -73,6 +73,16 @@ fn main() -> Result<()> {
     }
     
     println!("Current state of all parties: {}", PartyList(parties));
+
+    // Setup the circuits
+    let setup = CircuitSetup::new("build");
+    setup.setup_all()?;
+
+    // Encrypt the secret
+    let encryption_circuit = EncryptionCircuit::new("build");
+    let encrypted_secret = encryption_circuit.encrypt(&secret)?;
+    println!("Encrypted secret: {}", encrypted_secret);
+
     Ok(())
 }
 

@@ -8,6 +8,9 @@
     "compile-encrypt": "circom circuits/encryption.circom --r1cs --wasm --sym -o build/ -l node_modules",
     "compile-decrypt": "circom circuits/decryption.circom --r1cs --wasm --sym -o build/ -l node_modules",
     "compile-all": "npm run compile-encrypt && npm run compile-decrypt",
+    "compile-encrypt-rust": "circom circuits/encryption.circom --r1cs --wasm --sym -o evolvingDKG/build/ -l node_modules",
+    "compile-decrypt-rust": "circom circuits/decryption.circom --r1cs --wasm --sym -o evolvingDKG/build/ -l node_modules",
+    "compile-all-rust": "npm run compile-encrypt-rust && npm run compile-decrypt-rust",
     "test": "echo \"Tests not implemented yet\" && exit 1"
   },
   "keywords": [

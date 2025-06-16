@@ -7,6 +7,9 @@ use dusk_jubjub::{JubJubScalar, JubJubExtended};
 use group::GroupEncoding;
 
 pub mod elgamal;
+pub mod setup_zk;
+pub mod circom_encryption;
+pub mod circom_decryption;
 use elgamal::ElGamalCiphertext;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
