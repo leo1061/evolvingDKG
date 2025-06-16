@@ -1,0 +1,23 @@
+# Dependencies
+node_modules
+npm-debug.log
+
+# Build output
+build
+evolvingDKG/build
+
+# Version control
+.git
+.gitignore
+
+# Environment files
+.env
+.env.*
+
+# IDE files
+.vscode
+.idea
+
+# OS files
+.DS_Store
+Thumbs.db 
