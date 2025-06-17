@@ -46,3 +46,8 @@ public.json
 bjj_sk*.txt
 bjj_pk*.txt
 "circuits/decryption copy.circom"
+
+# claude code related
+.claude-config.json
+.env*
+
