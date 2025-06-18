@@ -80,25 +80,20 @@ fn main() -> Result<()> {
     for i in 0..n {
         let mut party_encrypted_shares = Vec::new();
         for j in 0..n {
-            if i != j {
-                // Get recipient's public key from PKI
-                let recipient_pk = pki.get_public_key(j as usize).unwrap();
-                let jubjub_pk: JubJubExtended = recipient_pk.clone().into();
-                
-                // Convert share to JubJub point for encryption
-                let share_value = &all_shares[i as usize][j as usize].value;
-                let share_scalar = share_to_scalar(share_value)?;
-                let share_point = GENERATOR_EXTENDED * &share_scalar;
-                
-                // Encrypt the share
-                let encrypted_share = elgamal::encrypt(&jubjub_pk, &share_point, &mut rng)?;
-                party_encrypted_shares.push(Some(encrypted_share));
-                
-                println!("Party {} encrypted share for party {}", i, j);
-            } else {
-                // Party doesn't encrypt share for themselves
-                party_encrypted_shares.push(None);
-            }
+            // Get recipient's public key from PKI
+            let recipient_pk = pki.get_public_key(j as usize).unwrap();
+            let jubjub_pk: JubJubExtended = recipient_pk.clone().into();
+            
+            // Convert share to JubJub point for encryption
+            let share_value = &all_shares[i as usize][j as usize].value;
+            let share_scalar = share_to_scalar(share_value)?;
+            let share_point = GENERATOR_EXTENDED * &share_scalar;
+            
+            // Encrypt the share (including for self)
+            let encrypted_share = elgamal::encrypt(&jubjub_pk, &share_point, &mut rng)?;
+            party_encrypted_shares.push(Some(encrypted_share));
+            
+            println!("Party {} encrypted share for party {}", i, j);
         }
         encrypted_shares.push(party_encrypted_shares);
     }
@@ -111,35 +106,29 @@ fn main() -> Result<()> {
     for i in 0..n {
         let mut party_proofs = Vec::new();
         for j in 0..n {
-            if i != j {
-                // Get the actual share value and recipient's public key
-                let share_value = &all_shares[i as usize][j as usize].value;
-                let recipient_pk = pki.get_public_key(j as usize).unwrap();
-                
-                // Convert share to curve point coordinates
-                let share_point = convert_share_to_curve_point(share_value)?;
-                
-                // Generate a cryptographically secure random nonce
-                let nonce = generate_secure_nonce(&mut rng)?;
-                
-                // Create proper circuit input
-                let circuit_input = serde_json::json!({
-                    "message": [share_point.0.to_string(), share_point.1.to_string()],
-                    "nonceKey": nonce.to_string(),
-                    "publicKey": [recipient_pk.x.to_string(), recipient_pk.y.to_string()]
-                });
-                
-                // Generate witness and proof using the actual circuit
-                let witness_path = encryption_circuit.generate_witness(&circuit_input)?;
-                let (proof, public_inputs) = encryption_circuit.generate_proof(&witness_path)?;
-                
-                party_proofs.push((proof, public_inputs));
-                println!("Party {} generated ZK proof for share to party {}", i, j);
-            } else {
-                // No proof needed for self (party doesn't send to themselves)
-                let empty_proof = (serde_json::json!(null), serde_json::json!(null));
-                party_proofs.push(empty_proof);
-            }
+            // Get the actual share value and recipient's public key
+            let share_value = &all_shares[i as usize][j as usize].value;
+            let recipient_pk = pki.get_public_key(j as usize).unwrap();
+            
+            // Convert share to curve point coordinates
+            let share_point = convert_share_to_curve_point(share_value)?;
+            
+            // Generate a cryptographically secure random nonce
+            let nonce = generate_secure_nonce(&mut rng)?;
+            
+            // Create proper circuit input
+            let circuit_input = serde_json::json!({
+                "message": [share_point.0.to_string(), share_point.1.to_string()],
+                "nonceKey": nonce.to_string(),
+                "publicKey": [recipient_pk.x.to_string(), recipient_pk.y.to_string()]
+            });
+            
+            // Generate witness and proof using the actual circuit (including for self)
+            let witness_path = encryption_circuit.generate_witness(&circuit_input)?;
+            let (proof, public_inputs) = encryption_circuit.generate_proof(&witness_path)?;
+            
+            party_proofs.push((proof, public_inputs));
+            println!("Party {} generated ZK proof for share to party {}", i, j);
         }
         proofs.push(party_proofs);
     }
@@ -151,15 +140,13 @@ fn main() -> Result<()> {
     
     for sender in 0..n {
         for receiver in 0..n {
-            if sender != receiver {
-                if let Some(ref encrypted_share) = encrypted_shares[sender as usize][receiver as usize] {
-                    received_encrypted_shares[receiver as usize].push(Some(encrypted_share.clone()));
-                    received_proofs[receiver as usize].push(proofs[sender as usize][receiver as usize].clone());
-                    println!("Party {} received encrypted share and proof from party {}", receiver, sender);
-                } else {
-                    received_encrypted_shares[receiver as usize].push(None);
-                    received_proofs[receiver as usize].push((serde_json::json!(null), serde_json::json!(null)));
-                }
+            if let Some(ref encrypted_share) = encrypted_shares[sender as usize][receiver as usize] {
+                received_encrypted_shares[receiver as usize].push(Some(encrypted_share.clone()));
+                received_proofs[receiver as usize].push(proofs[sender as usize][receiver as usize].clone());
+                println!("Party {} received encrypted share and proof from party {}", receiver, sender);
+            } else {
+                received_encrypted_shares[receiver as usize].push(None);
+                received_proofs[receiver as usize].push((serde_json::json!(null), serde_json::json!(null)));
             }
         }
     }
@@ -169,28 +156,24 @@ fn main() -> Result<()> {
     let mut valid_parties: Vec<Vec<bool>> = vec![vec![true; n as usize]; n as usize];
     
     for receiver in 0..n {
-        let mut sender_idx = 0;
         for sender in 0..n {
-            if sender != receiver {
-                // Verify the actual zero-knowledge proof using the circuit
-                let (proof, public_inputs) = &received_proofs[receiver as usize][sender_idx];
+            // Verify the actual zero-knowledge proof using the circuit
+            let (proof, public_inputs) = &received_proofs[receiver as usize][sender as usize];
+            
+            // Skip null proofs
+            if proof.is_null() || public_inputs.is_null() {
+                valid_parties[receiver as usize][sender as usize] = true;
+            } else {
+                // Use the actual circuit verification
+                let is_valid = encryption_circuit.verify_proof(proof, public_inputs)
+                    .unwrap_or(false);
+                valid_parties[receiver as usize][sender as usize] = is_valid;
                 
-                // Skip null proofs (self-sends)
-                if proof.is_null() || public_inputs.is_null() {
-                    valid_parties[receiver as usize][sender as usize] = true;
+                if is_valid {
+                    println!("✅ Party {} verified proof from party {}", receiver, sender);
                 } else {
-                    // Use the actual circuit verification
-                    let is_valid = encryption_circuit.verify_proof(proof, public_inputs)
-                        .unwrap_or(false);
-                    valid_parties[receiver as usize][sender as usize] = is_valid;
-                    
-                    if is_valid {
-                        println!("✅ Party {} verified proof from party {}", receiver, sender);
-                    } else {
-                        println!("❌ Party {} rejected proof from party {} - SKIPPING", receiver, sender);
-                    }
+                    println!("❌ Party {} rejected proof from party {} - SKIPPING", receiver, sender);
                 }
-                sender_idx += 1;
             }
         }
     }

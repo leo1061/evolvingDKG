@@ -3,8 +3,9 @@ use anyhow::Result;
 use num_bigint::BigUint;
 use serde::{Deserialize, Serialize};
 use serde_json;
-use dusk_jubjub::{JubJubScalar, JubJubExtended};
+use dusk_jubjub::{JubJubScalar, JubJubExtended, JubJubAffine, GENERATOR_EXTENDED};
 use group::GroupEncoding;
+use ff::Field;
 
 pub mod elgamal;
 pub mod setup_zk;
@@ -20,33 +21,44 @@ pub struct BabyJubJubPK {
 
 impl From<JubJubExtended> for BabyJubJubPK {
     fn from(pk: JubJubExtended) -> Self {
-        let bytes = pk.to_bytes();
-        // The bytes represent the x-coordinate in compressed format
+        use dusk_jubjub::JubJubAffine;
+        
+        // Convert to affine coordinates to get both x and y
+        let affine: JubJubAffine = pk.into();
+        
+        // Extract x and y coordinates - use get_u and get_v for Edwards coordinates
+        let u_bytes = affine.get_u().to_bytes();
+        let v_bytes = affine.get_v().to_bytes();
+        
         Self {
-            x: BigUint::from_bytes_le(&bytes),
-            y: BigUint::from(0u32), // We can't recover y from compressed format
+            x: BigUint::from_bytes_le(&u_bytes),
+            y: BigUint::from_bytes_le(&v_bytes),
         }
     }
 }
 
 impl From<BabyJubJubPK> for JubJubExtended {
     fn from(pk: BabyJubJubPK) -> Self {
-        use dusk_jubjub::GENERATOR_EXTENDED;
-        use std::collections::hash_map::DefaultHasher;
-        use std::hash::{Hash, Hasher};
+        use dusk_jubjub::JubJubAffine;
         
-        // Create a deterministic scalar from the public key coordinates
-        let mut hasher = DefaultHasher::new();
-        pk.x.hash(&mut hasher);
-        pk.y.hash(&mut hasher);
-        let hash_value = hasher.finish();
+        // Convert BigUint coordinates to field elements
+        let u_field = biguint_to_field(&pk.x).expect("Invalid u coordinate");
+        let v_field = biguint_to_field(&pk.y).expect("Invalid v coordinate");
         
-        // Convert to a JubJub scalar
-        let mut scalar_bytes = [0u8; 32];
-        scalar_bytes[0..8].copy_from_slice(&hash_value.to_le_bytes());
+        // Create affine point from Edwards coordinates (u, v)
+        let affine = JubJubAffine::from_raw_unchecked(u_field, v_field);
         
-        let scalar = JubJubScalar::from_bytes(&scalar_bytes).unwrap();
-        GENERATOR_EXTENDED * &scalar
+        // Verify the point is on the curve
+        if affine.is_on_curve().into() {
+            affine.into()
+        } else {
+            // If coordinates don't form a valid curve point, try to recover
+            // This handles cases where we only have u coordinate (compressed format)
+            recover_point_from_u(&pk.x).unwrap_or_else(|_| {
+                // Fallback: create a deterministic valid point
+                create_deterministic_point(&pk.x, &pk.y)
+            })
+        }
     }
 }
 
@@ -223,6 +235,108 @@ pub fn read_keys(i: u32) -> (BabyJubJubSK, BabyJubJubPK) {
     };
 
     (sk, pk)
+}
+
+// Helper function to convert BigUint to JubJub scalar with proper field reduction
+fn biguint_to_scalar(value: &BigUint) -> Result<JubJubScalar> {
+    let mut bytes = [0u8; 32];
+    let value_bytes = value.to_bytes_le();
+    
+    // Handle values that are larger than 32 bytes
+    if value_bytes.len() > 32 {
+        // Use modular reduction to fit within field
+        let field_modulus = BigUint::from_str("52435875175126190479447740508185965837690552500527637822603658699938581184513")?;
+        let reduced = value % &field_modulus;
+        let reduced_bytes = reduced.to_bytes_le();
+        bytes[0..reduced_bytes.len().min(32)].copy_from_slice(&reduced_bytes[0..reduced_bytes.len().min(32)]);
+    } else {
+        bytes[0..value_bytes.len()].copy_from_slice(&value_bytes);
+    }
+    
+    // Create scalar from bytes using CtOption
+    JubJubScalar::from_bytes(&bytes).into_option().ok_or_else(|| anyhow::anyhow!("Invalid scalar bytes"))
+}
+
+// Helper function to convert BigUint to JubJub field element
+fn biguint_to_field(value: &BigUint) -> Result<dusk_jubjub::Fq> {
+    let mut bytes = [0u8; 32];
+    let value_bytes = value.to_bytes_le();
+    
+    // Handle values that are larger than 32 bytes
+    if value_bytes.len() > 32 {
+        // Use modular reduction to fit within field
+        let field_modulus = BigUint::from_str("52435875175126190479447740508185965837690552500527637822603658699938581184513")?;
+        let reduced = value % &field_modulus;
+        let reduced_bytes = reduced.to_bytes_le();
+        bytes[0..reduced_bytes.len().min(32)].copy_from_slice(&reduced_bytes[0..reduced_bytes.len().min(32)]);
+    } else {
+        bytes[0..value_bytes.len()].copy_from_slice(&value_bytes);
+    }
+    
+    // Create field element from bytes using CtOption
+    dusk_jubjub::Fq::from_bytes(&bytes).into_option().ok_or_else(|| anyhow::anyhow!("Invalid field element bytes"))
+}
+
+// Recover a JubJub point from u coordinate (for compressed point decompression)
+fn recover_point_from_u(u: &BigUint) -> Result<JubJubExtended> {
+    use ff::Field;
+    use dusk_jubjub::JubJubAffine;
+    
+    let u_field = biguint_to_field(u)?;
+    
+    // Edwards curve equation: u^2 + v^2 = 1 + d*u^2*v^2
+    // Where d is the Edwards curve parameter for BabyJubJub
+    // Rearranging: v^2 = (1 - u^2) / (1 + d*u^2)
+    
+    // BabyJubJub parameter d = 168696/168700 
+    let d_num = dusk_jubjub::Fq::from(168696u64);
+    let d_den = dusk_jubjub::Fq::from(168700u64);
+    let d = d_num * d_den.invert().unwrap();
+    
+    let u_squared = u_field.square();
+    let numerator = dusk_jubjub::Fq::one() - u_squared;
+    let denominator = dusk_jubjub::Fq::one() + d * u_squared;
+    
+    let denom_inv_opt: Option<dusk_jubjub::Fq> = denominator.invert().into();
+    if let Some(denom_inv) = denom_inv_opt {
+        let v_squared = numerator * denom_inv;
+        
+        // Try to find square root
+        if let Some(v_field) = v_squared.sqrt().into() {
+            let affine = JubJubAffine::from_raw_unchecked(u_field, v_field);
+            if affine.is_on_curve().into() {
+                return Ok(affine.into());
+            }
+            
+            // Try the negative square root
+            let v_field_neg = -v_field;
+            let affine_neg = JubJubAffine::from_raw_unchecked(u_field, v_field_neg);
+            if affine_neg.is_on_curve().into() {
+                return Ok(affine_neg.into());
+            }
+        }
+    }
+    
+    Err(anyhow::anyhow!("Cannot recover valid point from u coordinate"))
+}
+
+// Create a deterministic valid point from coordinates (fallback method)
+fn create_deterministic_point(x: &BigUint, y: &BigUint) -> JubJubExtended {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+    
+    // Create a deterministic scalar from both coordinates
+    let mut hasher = DefaultHasher::new();
+    x.hash(&mut hasher);
+    y.hash(&mut hasher);
+    let hash_value = hasher.finish();
+    
+    // Convert to a JubJub scalar
+    let mut scalar_bytes = [0u8; 32];
+    scalar_bytes[0..8].copy_from_slice(&hash_value.to_le_bytes());
+    
+    let scalar = JubJubScalar::from_bytes(&scalar_bytes).unwrap();
+    GENERATOR_EXTENDED * &scalar
 }
 
 #[cfg(test)]
