@@ -87,7 +87,7 @@ fn main() -> Result<()> {
             // Convert share to JubJub point for encryption
             let share_value = &all_shares[i as usize][j as usize].value;
             let share_scalar = share_to_scalar(share_value)?;
-            let share_point = GENERATOR_EXTENDED * &share_scalar;
+            let share_point = GENERATOR_EXTENDED * &share_scalar; // aka commitment to the share
             
             // Encrypt the share (including for self)
             let encrypted_share = elgamal::encrypt(&jubjub_pk, &share_point, &mut rng)?;
@@ -178,40 +178,60 @@ fn main() -> Result<()> {
         }
     }
     
-    // Step 8: Reconstruct the final DKG secret from valid shares
-    println!("\n--- Step 8: Reconstructing DKG secret ---");
-    let mut final_shares_for_reconstruction = Vec::new();
+    // Step 8: Distribute final DKG shares to each party
+    println!("\n--- Step 8: Computing final DKG shares ---");
     
-    // Collect shares from the first t valid parties for reconstruction
-    let mut valid_count = 0;
+    // Calculate the total distributed secret (sum of all party secrets)
+    let total_secret: BigUint = party_secrets.iter().sum();
+    println!("Total DKG secret (sum of all party secrets): {}", total_secret);
+    
+    // For each party, compute their final share by summing shares sent to them by all parties
     for party_idx in 0..n {
-        if valid_count >= t {
-            break;
+        let mut party_final_share = BigUint::from(0u32);
+        
+        // Sum all shares sent to this party by all other parties (including themselves)
+        for sender_idx in 0..n {
+            // Check if sender is considered valid by majority
+            let validations: usize = (0..n).map(|i| if valid_parties[i as usize][sender_idx as usize] { 1 } else { 0 }).sum();
+            if validations >= (n as usize / 2) {
+                // Add the share that sender_idx intended for party_idx
+                party_final_share += &all_shares[sender_idx as usize][party_idx as usize].value;
+                println!("Party {} received share {} from party {} (validated by {}/{} parties)", 
+                    party_idx, all_shares[sender_idx as usize][party_idx as usize].value, sender_idx, validations, n);
+            } else {
+                println!("Party {} ignoring share from party {} (only validated by {}/{} parties)", 
+                    party_idx, sender_idx, validations, n);
+            }
         }
         
-        // Check if this party is considered valid by majority
-        let validations: usize = (0..n).map(|i| if valid_parties[i as usize][party_idx as usize] { 1 } else { 0 }).sum();
-        if validations >= (n as usize / 2) {
-            final_shares_for_reconstruction.push(all_shares[party_idx as usize][0].clone());
-            valid_count += 1;
-            println!("Including party {} in final reconstruction (validated by {}/{} parties)", party_idx, validations, n);
-        } else {
-            println!("Excluding party {} from reconstruction (only validated by {}/{} parties)", party_idx, validations, n);
-        }
+        // Set the final share for this party
+        parties[party_idx as usize].set_share(party_final_share.clone());
+        println!("Party {} final share: {}", party_idx, party_final_share);
     }
     
-    if final_shares_for_reconstruction.len() >= t as usize {
-        let reconstructed_dkg_secret = scheme.reconstruct_secret(&final_shares_for_reconstruction[0..t as usize])?;
-        println!("\n✅ DKG Protocol completed successfully!");
-        println!("Reconstructed DKG secret: {}", reconstructed_dkg_secret);
+    // Verify the DKG worked correctly by reconstructing the secret from any t shares
+    println!("\n--- Step 9: Verifying DKG reconstruction ---");
+    let mut verification_shares = Vec::new();
+    for i in 0..t {
+        let share = shamir_rs::Share {
+            index: (i + 1) as u32, // Shamir shares are 1-indexed
+            value: parties[i as usize].share.share.clone(),
+        };
+        verification_shares.push(share);
+    }
+    
+    if verification_shares.len() >= t as usize {
+        let reconstructed_secret = scheme.reconstruct_secret(&verification_shares)?;
+        println!("Reconstructed secret from first {} parties: {}", t, reconstructed_secret);
+        println!("Expected total secret: {}", total_secret);
         
-        // Verify this matches party 0's original secret (for demo purposes)
-        println!("Original party 0 secret: {}", party_secrets[0]);
-        
-        // Set the reconstructed secret as the final shared secret
-        parties[0].set_share(reconstructed_dkg_secret.clone());
+        if reconstructed_secret == total_secret {
+            println!("\n✅ DKG Protocol completed successfully! Reconstruction matches expected total.");
+        } else {
+            println!("\n⚠️ DKG Protocol completed but reconstruction doesn't match expected total.");
+        }
     } else {
-        println!("❌ Not enough valid parties for reconstruction ({} < {})", final_shares_for_reconstruction.len(), t);
+        println!("❌ Not enough shares for verification reconstruction");
     }
     
     println!("\nFinal state of all parties: {}", PartyList(parties));
