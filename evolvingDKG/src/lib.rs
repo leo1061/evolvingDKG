@@ -1,4 +1,4 @@
-use std::{fs, path::Path, process::Command, str::FromStr, fmt};
+use std::{fs, path::Path, process::Command, str::FromStr, fmt, hash::Hash};
 use anyhow::Result;
 use num_bigint::BigUint;
 use serde::{Deserialize, Serialize};
@@ -12,7 +12,7 @@ pub mod circom_encryption;
 pub mod circom_decryption;
 use elgamal::ElGamalCiphertext;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Hash)]
 pub struct BabyJubJubPK {
     pub x: BigUint,
     pub y: BigUint,
@@ -31,10 +31,22 @@ impl From<JubJubExtended> for BabyJubJubPK {
 
 impl From<BabyJubJubPK> for JubJubExtended {
     fn from(pk: BabyJubJubPK) -> Self {
-        let mut bytes = [0u8; 32];
-        let x_bytes = pk.x.to_bytes_le();
-        bytes[0..x_bytes.len()].copy_from_slice(&x_bytes);
-        JubJubExtended::from_bytes(&bytes).unwrap()
+        use dusk_jubjub::GENERATOR_EXTENDED;
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+        
+        // Create a deterministic scalar from the public key coordinates
+        let mut hasher = DefaultHasher::new();
+        pk.x.hash(&mut hasher);
+        pk.y.hash(&mut hasher);
+        let hash_value = hasher.finish();
+        
+        // Convert to a JubJub scalar
+        let mut scalar_bytes = [0u8; 32];
+        scalar_bytes[0..8].copy_from_slice(&hash_value.to_le_bytes());
+        
+        let scalar = JubJubScalar::from_bytes(&scalar_bytes).unwrap();
+        GENERATOR_EXTENDED * &scalar
     }
 }
 

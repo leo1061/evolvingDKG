@@ -20,8 +20,12 @@ ENV PATH="/root/.cargo/bin:${PATH}"
 # Install snarkjs globally
 RUN npm install -g snarkjs
 
-# Skip circom installation for now - we'll modify tests to use pre-built circuits
-# RUN echo "Skipping circom installation - using pre-built circuits"
+# Install circom
+RUN git clone https://github.com/iden3/circom.git && \
+    cd circom && \
+    cargo build --release && \
+    cargo install --path circom && \
+    cd .. && rm -rf circom
 
 # Create app directory
 WORKDIR /app

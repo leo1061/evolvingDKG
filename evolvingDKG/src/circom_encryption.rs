@@ -90,19 +90,12 @@ impl EncryptionCircuit {
         Ok(output.status.success())
     }
 
-    pub fn encrypt(&self, secret: &BigUint) -> Result<Value> {
-        // Convert the secret to a point on the BabyJubjub curve
-        // This is a simplified example - in practice, you'd need proper point conversion
+    pub fn encrypt_with_proof(&self, message_point: &(BigUint, BigUint), nonce: &BigUint, public_key: &(BigUint, BigUint)) -> Result<Value> {
+        // Create proper circuit input with actual cryptographic values
         let input = json!({
-            "message": [
-                secret.to_string(),
-                "0"  // y-coordinate (simplified)
-            ],
-            "nonceKey": "123456789",  // In practice, this should be a random value
-            "publicKey": [
-                "5299619240641551281634865583518297030282874472190772894086521144482721001553",
-                "16950150798460657717958625567821834550301663161624707787222815936182638968203"
-            ]
+            "message": [message_point.0.to_string(), message_point.1.to_string()],
+            "nonceKey": nonce.to_string(),
+            "publicKey": [public_key.0.to_string(), public_key.1.to_string()]
         });
 
         // Generate witness
@@ -111,10 +104,12 @@ impl EncryptionCircuit {
         // Generate proof
         let (proof, public_inputs) = self.generate_proof(&witness_path)?;
 
-        // Return the encrypted result
+        // Return the encrypted result with proof
         Ok(json!({
             "proof": proof,
-            "publicInputs": public_inputs
+            "publicInputs": public_inputs,
+            "ephemeralKey": public_inputs.get("ephemeralKey"),
+            "encryptedMessage": public_inputs.get("encryptedMessage")
         }))
     }
 }
