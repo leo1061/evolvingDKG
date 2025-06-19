@@ -67,6 +67,14 @@ pub struct BabyJubJubSK {
     pub value: BigUint,
 }
 
+impl BabyJubJubSK {
+    pub fn get_public_key(&self) -> BabyJubJubPK {     
+        let jubjub_sk = biguint_to_scalar(&self.value).expect("Invalid scalar value");
+        let jubjub_pk = GENERATOR_EXTENDED * &jubjub_sk;
+        jubjub_pk.into()
+    }
+}
+
 impl From<JubJubScalar> for BabyJubJubSK {
     fn from(sk: JubJubScalar) -> Self {
         Self {
@@ -84,12 +92,12 @@ impl From<BabyJubJubSK> for JubJubScalar {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Share {
     pub sk: BabyJubJubSK,
     pub pk: BabyJubJubPK,
     pub share: BigUint,
-    pub encr_share: Option<ElGamalCiphertext>,  // Encrypted share using ElGamal
+    pub encr_share: Option<Vec<ElGamalCiphertext>>,  // Encrypted share using ElGamal
 }
 
 impl Share {
@@ -106,8 +114,12 @@ impl Share {
         self.share = share;
     }
 
-    pub fn set_encrypted_share(&mut self, encr_share: ElGamalCiphertext) {
+    pub fn set_encrypted_share(&mut self, encr_share: Vec<ElGamalCiphertext>) {
         self.encr_share = Some(encr_share);
+    }
+
+    pub fn get_encrypted_share(&self) -> Option<&Vec<ElGamalCiphertext>> {
+        self.encr_share.as_ref()
     }
 }
 
@@ -119,16 +131,18 @@ impl fmt::Display for Share {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Party {
     pub index: u32,
+    pub generation: u32,
     pub share: Share,   
 }
 
 impl Party {
-    pub fn new(i: u32, sk: BabyJubJubSK, pk: BabyJubJubPK) -> Result<Self> {
+    pub fn new(i: u32, g: u32, sk: BabyJubJubSK, pk: BabyJubJubPK) -> Result<Self> {
         Ok(Self {
             index: i,
+            generation: g,
             share: Share::new(sk, pk),
         })
     }
@@ -136,6 +150,10 @@ impl Party {
     pub fn set_share(&mut self, share: BigUint) {
         self.share.set_share(share);
     }
+
+    pub fn get_generation(&mut self) -> u32 {
+        self.generation
+    }   
 }
 
 impl fmt::Display for Party {
