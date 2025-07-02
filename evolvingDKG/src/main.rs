@@ -57,7 +57,7 @@ fn main() -> Result<()> {
     println!("\n=== Initialization: Initialization: Step 1: Zero-knowledge setup ===");
     let setup = CircuitSetup::new("build");
     // setup.setup_all()?;
-    println!("✅ Zero-knowledge setup completed for all parties");
+    println!("Zero-knowledge setup completed for all parties");
 
     // Choose a large prime for the field
     let prime = BigUint::from_str("340282366920938463463374607431768211297")?;
@@ -218,9 +218,9 @@ fn main() -> Result<()> {
             };
             
             if is_valid {
-                println!("✅ Party {} verified proof from party {}", receiver, sender);
+                println!("Party {} verified proof from party {}", receiver, sender);
             } else {
-                println!("❌ Party {} rejected proof from party {} - SKIPPING", receiver, sender);
+                println!("Party {} rejected proof from party {} - SKIPPING", receiver, sender);
             }
             
             ((receiver, sender), is_valid)
@@ -281,7 +281,7 @@ fn main() -> Result<()> {
         println!("Expected total secret: {}", total_secret);
         
         if reconstructed_secret == total_secret {
-            println!("\n✅ DKG Protocol completed successfully! Reconstruction matches expected total.");
+            println!("\nDKG Protocol completed successfully! Reconstruction matches expected total.");
         } else {
             println!("\n⚠️ DKG Protocol completed but reconstruction doesn't match expected total.");
         }
@@ -575,7 +575,7 @@ fn main() -> Result<()> {
         }
     }
     
-    println!("\n✅ Round 1 of Evolving DKG completed successfully!");
+    println!("\nRound 1 of Evolving DKG completed successfully!");
     println!("- {} participating parties from generation {} sent shares", 
              participating_parties.len(), g-1);
     println!("- {} new parties in generation {} received encrypted shares", 
@@ -725,10 +725,10 @@ fn main() -> Result<()> {
         // Step 8: Broadcast Y_i to all parties
         println!("Party {}: broadcasting Y_i commitment to all parties", new_party.index);
         
-        println!("✅ Round 2 completed for Party {}", new_party.index);
+        println!("Round 2 completed for Party {}", new_party.index);
     }
     
-    println!("\n✅ Round 2 of Evolving DKG completed successfully!");
+    println!("\nRound 2 of Evolving DKG completed successfully!");
     println!("- All {} new parties processed their encrypted shares", new_parties.len());
     println!("- Share decryption, aggregation, and broadcasting completed");
     

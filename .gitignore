@@ -51,3 +51,4 @@ bjj_pk*.txt
 .claude-config.json
 .env*
 
+evolvingDKG/remove-emoji.sh
