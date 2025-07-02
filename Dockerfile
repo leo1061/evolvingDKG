@@ -10,6 +10,7 @@ RUN apt-get update && apt-get install -y \
     libssl-dev \
     python3 \
     python3-pip \
+    jq \
     wget \
     && rm -rf /var/lib/apt/lists/*
 
