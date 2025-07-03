@@ -52,3 +52,4 @@ bjj_pk*.txt
 .env*
 
 evolvingDKG/remove-emoji.sh
+evolvingDKG/sigma.txt
