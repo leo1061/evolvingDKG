@@ -8,6 +8,7 @@ use group::GroupEncoding;
 use ff::Field;
 
 pub mod elgamal;
+pub mod schnorr_lib;
 pub mod setup_zk;
 pub mod circom_encryption;
 pub mod circom_decryption;
@@ -256,7 +257,7 @@ pub fn read_keys(i: u32) -> (BabyJubJubSK, BabyJubJubPK) {
 }
 
 // Helper function to convert BigUint to JubJub scalar with proper field reduction
-fn biguint_to_scalar(value: &BigUint) -> Result<JubJubScalar> {
+pub fn biguint_to_scalar(value: &BigUint) -> Result<JubJubScalar> {
     let mut bytes = [0u8; 32];
     let value_bytes = value.to_bytes_le();
     

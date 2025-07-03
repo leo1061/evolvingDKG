@@ -20,7 +20,7 @@ template ElGamalEncrypt() {
     signal output encryptedMessage[2];            
     
     // Convert nonceKey to bits for scalar multiplication
-    component nonceNum = Num2Bits(250);
+    component nonceNum = Num2Bits(254);
     nonceNum.in <== nonceKey;  // Fixed: use <== for input assignment
     
     // Validate public key is not the identity point (0,1)
@@ -54,18 +54,18 @@ template ElGamalEncrypt() {
     ];        
 
     // Calculate the ephemeral key: [nonceKey] * Base
-    component ephemeralKeyCalc = EscalarMulFix(250, base);
-    for (var i = 0; i < 250; i++) {
+    component ephemeralKeyCalc = EscalarMulFix(254, base);
+    for (var i = 0; i < 254; i++) {
         ephemeralKeyCalc.e[i] <== nonceNum.out[i];
     }
     ephemeralKey[0] <== ephemeralKeyCalc.out[0];
     ephemeralKey[1] <== ephemeralKeyCalc.out[1];
     
     // Calculate the shared secret: [nonceKey] * publicKey
-    component sharedSecret = EscalarMulAny(250);
+    component sharedSecret = EscalarMulAny(254);
     sharedSecret.p[0] <== publicKey[0];
     sharedSecret.p[1] <== publicKey[1];
-    for (var j = 0; j < 250; j++) {
+    for (var j = 0; j < 254; j++) {
         sharedSecret.e[j] <== nonceNum.out[j];
     }
 
