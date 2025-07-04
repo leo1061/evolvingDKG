@@ -56,7 +56,7 @@ fn main() -> Result<()> {
     // Initialization: Initialization: Step 1: Each party runs the zero-knowledge setup to get the keys
     println!("\n=== Initialization: Initialization: Step 1: Zero-knowledge setup ===");
     let setup = CircuitSetup::new("build");
-    // setup.setup_all()?;
+    setup.setup_all()?;
     println!("Zero-knowledge setup completed for all parties");
 
     // Choose a large prime for the field
@@ -283,7 +283,7 @@ fn main() -> Result<()> {
         if reconstructed_secret == total_secret {
             println!("\nDKG Protocol completed successfully! Reconstruction matches expected total.");
         } else {
-            println!("\n⚠️ DKG Protocol completed but reconstruction doesn't match expected total.");
+            println!("\nDKG Protocol completed but reconstruction doesn't match expected total.");
         }
     } else {
         println!("❌ Not enough shares for verification reconstruction");
