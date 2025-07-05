@@ -3,15 +3,18 @@ use anyhow::Result;
 use num_bigint::BigUint;
 use serde::{Deserialize, Serialize};
 use serde_json;
-use dusk_jubjub::{JubJubScalar, JubJubExtended, JubJubAffine, GENERATOR_EXTENDED};
-use group::GroupEncoding;
-use ff::Field;
+use dusk_jubjub::{JubJubScalar, JubJubExtended, GENERATOR_EXTENDED};
 
 pub mod elgamal;
 pub mod schnorr_lib;
 pub mod setup_zk;
 pub mod circom_encryption;
 pub mod circom_decryption;
+pub mod sigma_protocol;
+pub mod utils;
+pub mod protocol_init;
+pub mod round1;
+pub mod round2;
 use elgamal::ElGamalCiphertext;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Hash)]
@@ -179,6 +182,7 @@ impl fmt::Display for PartyList {
     }
 }
 
+#[derive(Clone)]
 pub struct PKI {
     pub keys: Vec<BabyJubJubPK>,
 }

@@ -1,15 +1,8 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use serde_json::{json, Value};
+use serde_json::Value;
 use anyhow::{Result, Context};
-use dusk_jubjub::{JubJubScalar, GENERATOR_EXTENDED};
-use rand::rngs::StdRng;
-use rand::SeedableRng;
-use ff::Field;
-use group::GroupEncoding;
-use crate::circom_encryption::EncryptionCircuit;
-use group::Curve;
 
 pub struct DecryptionCircuit {
     build_dir: PathBuf,

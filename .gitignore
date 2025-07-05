@@ -53,3 +53,5 @@ bjj_pk*.txt
 
 evolvingDKG/remove-emoji.sh
 evolvingDKG/sigma.txt
+circom-build/
+evolvingDKG/tags

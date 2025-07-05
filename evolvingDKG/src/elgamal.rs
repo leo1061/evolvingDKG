@@ -1,9 +1,7 @@
 use anyhow::Result;
-use jubjub_elgamal::{Encryption, DecryptFrom};
 use dusk_jubjub::{JubJubScalar, JubJubExtended, GENERATOR_EXTENDED};
 use ff::Field;
 use rand::rngs::StdRng;
-use rand::SeedableRng;
 
 /// Represents an ElGamal ciphertext using JubJub curve
 #[derive(Debug, Clone)]
