@@ -17,33 +17,54 @@ impl EncryptionCircuit {
     }
 
     pub fn generate_witness(&self, input: &Value) -> Result<PathBuf> {
-        let input_path = self.build_dir.join("input.json");
+        // Use thread ID to create unique file names and avoid conflicts
+        let thread_id = std::thread::current().id();
+        let input_path = self.build_dir.join(format!("input_{:?}.json", thread_id));
         fs::write(&input_path, serde_json::to_string_pretty(input)?)
             .context("Failed to write input file")?;
 
-        let witness_path = self.build_dir.join("witness.wtns");
+        let witness_path = self.build_dir.join(format!("witness_{:?}.wtns", thread_id));
         let encryption_js_dir = self.build_dir.join("encryption_js");
 
-        Command::new("node")
+        let output = Command::new("node")
             .current_dir(&encryption_js_dir)
             .args([
                 "generate_witness.js",
                 "encryption.wasm",
-                "../input.json",
-                "../witness.wtns",
+                &format!("../input_{:?}.json", thread_id),
+                &format!("../witness_{:?}.wtns", thread_id),
             ])
             .output()
-            .context("Failed to generate witness")?;
+            .context("Failed to execute node generate_witness command")?;
+
+        // Check if the witness generation succeeded
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            return Err(anyhow::anyhow!(
+                "Node generate_witness command failed. Exit status: {:?}\nStdout: {}\nStderr: {}", 
+                output.status.code(), stdout, stderr
+            ));
+        }
+
+        // Check if witness file was actually created
+        if !witness_path.exists() {
+            return Err(anyhow::anyhow!(
+                "Witness file was not created: {:?}", witness_path
+            ));
+        }
 
         Ok(witness_path)
     }
 
     pub fn generate_proof(&self, witness_path: &Path) -> Result<(Value, Value)> {
-        let proof_path = self.build_dir.join("proof.json");
-        let public_path = self.build_dir.join("public.json");
+        // Use thread ID to create unique file names and avoid conflicts
+        let thread_id = std::thread::current().id();
+        let proof_path = self.build_dir.join(format!("proof_{:?}.json", thread_id));
+        let public_path = self.build_dir.join(format!("public_{:?}.json", thread_id));
         let zkey_path = self.build_dir.join("encryption_final.zkey");
 
-        Command::new("snarkjs")
+        let output = Command::new("snarkjs")
             .args([
                 "groth16",
                 "prove",
@@ -53,23 +74,57 @@ impl EncryptionCircuit {
                 public_path.to_str().unwrap(),
             ])
             .output()
-            .context("Failed to generate proof")?;
+            .context("Failed to execute snarkjs prove command")?;
+
+        // Check if the command succeeded
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            return Err(anyhow::anyhow!(
+                "snarkjs prove command failed. Exit status: {:?}\nStdout: {}\nStderr: {}", 
+                output.status.code(), stdout, stderr
+            ));
+        }
+
+        // Check if files were actually created
+        if !proof_path.exists() {
+            return Err(anyhow::anyhow!(
+                "Proof file was not created by snarkjs: {:?}", proof_path
+            ));
+        }
+        if !public_path.exists() {
+            return Err(anyhow::anyhow!(
+                "Public file was not created by snarkjs: {:?}", public_path
+            ));
+        }
 
         let proof = fs::read_to_string(&proof_path)
-            .context("Failed to read proof file")?;
+            .with_context(|| format!("Failed to read proof file: {:?}", proof_path))?;
         let public = fs::read_to_string(&public_path)
-            .context("Failed to read public file")?;
+            .with_context(|| format!("Failed to read public file: {:?}", public_path))?;
 
-        Ok((
-            serde_json::from_str(&proof)?,
-            serde_json::from_str(&public)?,
-        ))
+        // Parse JSON with better error handling
+        let proof_json = serde_json::from_str(&proof)
+            .with_context(|| format!("Failed to parse proof JSON from file: {:?}. Content (first 200 chars): {}", proof_path, &proof[..std::cmp::min(200, proof.len())]))?;
+        let public_json = serde_json::from_str(&public)
+            .with_context(|| format!("Failed to parse public JSON from file: {:?}. Content (first 200 chars): {}", public_path, &public[..std::cmp::min(200, public.len())]))?;
+
+        // Clean up temporary files
+        let _ = fs::remove_file(&proof_path);
+        let _ = fs::remove_file(&public_path);
+        let input_path = self.build_dir.join(format!("input_{:?}.json", thread_id));
+        let _ = fs::remove_file(&input_path);
+        let _ = fs::remove_file(witness_path);
+
+        Ok((proof_json, public_json))
     }
 
     pub fn verify_proof(&self, proof: &Value, public_inputs: &Value) -> Result<bool> {
+        // Use thread ID to create unique file names and avoid conflicts
+        let thread_id = std::thread::current().id();
         let verification_key_path = self.build_dir.join("verification_key.json");
-        let proof_path = self.build_dir.join("proof.json");
-        let public_path = self.build_dir.join("public.json");
+        let proof_path = self.build_dir.join(format!("proof_verify_{:?}.json", thread_id));
+        let public_path = self.build_dir.join(format!("public_verify_{:?}.json", thread_id));
 
         fs::write(&proof_path, serde_json::to_string(proof)?)
             .context("Failed to write proof file")?;
@@ -86,6 +141,10 @@ impl EncryptionCircuit {
             ])
             .output()
             .context("Failed to verify proof")?;
+
+        // Clean up temporary files
+        let _ = fs::remove_file(&proof_path);
+        let _ = fs::remove_file(&public_path);
 
         Ok(output.status.success())
     }

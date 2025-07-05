@@ -1,4 +1,4 @@
-vse anyhow::Result;
+use anyhow::Result;
 use evolvingDKG::{protocol_init::ProtocolInitializer, round1::Round1Executor, round2::Round2Executor};
 use rand::{rngs::StdRng, SeedableRng};
 
@@ -37,12 +37,14 @@ fn main() -> Result<()> {
     let rng = StdRng::seed_from_u64(0x12345678);
     
     // Execute Round 1
+    let prev_generation_total = n_array[0]; // Total parties from generation 0 (5 parties)
     let mut round1_executor = Round1Executor::new(
         participating_parties,
         initializer.pki.clone(),
         t,
         n,
         g,
+        prev_generation_total,
         rng,
     )?;
     

@@ -1,8 +1,8 @@
 use anyhow::Result;
 use num_bigint::BigUint;
-use crate::{key_gen, read_keys, Party, PKI, BabyJubJubPK, elgamal, utils::share_to_scalar};
+use crate::{key_gen, read_keys, Party, PKI, elgamal, utils::share_to_point};
 use rand::{rngs::StdRng, Rng};
-use dusk_jubjub::{JubJubExtended, GENERATOR_EXTENDED};
+use dusk_jubjub::JubJubExtended;
 use rayon::prelude::*;
 
 // Define message structure for σ̃_{j,k}
@@ -22,6 +22,7 @@ pub struct Round1Executor {
     pub t: u32,
     pub n: u32,
     pub g: u32,
+    pub prev_generation_total: u32, // Total number of parties from previous generation
     pub rng: StdRng,
 }
 
@@ -32,6 +33,7 @@ impl Round1Executor {
         t: u32,
         n: u32,
         g: u32,
+        prev_generation_total: u32,
         rng: StdRng,
     ) -> Result<Self> {
         // Initialize new parties for generation g
@@ -45,7 +47,7 @@ impl Round1Executor {
         let new_key_results: Result<Vec<Party>> = new_party_tasks
             .par_iter()
             .map(|&i| -> Result<Party> {
-                let party_id = (participating_parties.len() + i) as u32; // Continue numbering from existing parties
+                let party_id = prev_generation_total + (i as u32); // Continue numbering from total previous generation parties
                 println!("Generating keys for new party {}", party_id);
                 key_gen(party_id)?;
                 let (sk, pk) = read_keys(party_id);
@@ -70,6 +72,7 @@ impl Round1Executor {
             t,
             n,
             g,
+            prev_generation_total,
             rng,
         })
     }
@@ -117,10 +120,9 @@ impl Round1Executor {
             
             println!("Party {}: sk_j={}, x_j={}", party.index, sk_j.value, x_j);
             
-            // Compute Y_j = g^{x_j} using group exponentiation
-            // Convert x_j (BigUint) to JubJubScalar for exponentiation
-            let x_j_scalar = share_to_scalar(x_j)?;
-            let y_j = GENERATOR_EXTENDED * &x_j_scalar; // Y_j = g^{x_j}
+            // Compute Y_j = g^{x_j} using the new share_to_point function
+            // This provides a direct mapping without discrete logarithm
+            let y_j = share_to_point(x_j)?; // Y_j = g^{x_j}
             
             party_commitments.push(y_j);
             println!("Party {}: computed Y_j (commitment)", party.index);
@@ -177,12 +179,13 @@ impl Round1Executor {
         for (j, polynomial) in party_polynomials.iter().enumerate() {
             let mut shares_for_party_j = Vec::new();
             
-            // For each P_k with k ∈ [n] (all new parties), create x_{j,k} = G_j(k)
-            for k in 1..=self.n {
-                let x_jk = evaluate_polynomial(polynomial, k as u32);
+            // For each new party P_k, create x_{j,k} = G_j(k) where k is the actual party index
+            for (local_k, new_party) in self.new_parties.iter().enumerate() {
+                let actual_party_k = new_party.index;
+                let x_jk = evaluate_polynomial(polynomial, actual_party_k);
                 shares_for_party_j.push(x_jk.clone());
                 println!("Party {}: x_{{j={},k={}}} = G_{}({}) = {}", 
-                         self.participating_parties[j].index, j, k, j, k, x_jk);
+                         self.participating_parties[j].index, j, actual_party_k, j, actual_party_k, x_jk);
             }
             
             polynomial_shares.push(shares_for_party_j);
@@ -209,11 +212,9 @@ impl Round1Executor {
                 let recipient_pk = &self.new_parties[k].share.pk;
                 let jubjub_pk: JubJubExtended = recipient_pk.clone().into();
                 
-                // Convert share to a smaller value for practical discrete log computation
-                // Take the share modulo a manageable value for demo purposes
-                let share_mod = x_jk % BigUint::from(1000u64); // Reduced for performance
-                let share_scalar = dusk_jubjub::JubJubScalar::from(share_mod.to_u64_digits()[0] as u64);
-                let share_point = GENERATOR_EXTENDED * &share_scalar;
+                // Convert share directly to a point using the new mapping function
+                // This avoids discrete logarithm computation
+                let share_point = share_to_point(x_jk)?;
                 
                 // Compute γ_{j,k} = Enc(pk_k, (x_{j,k}, ω_{j,k}))
                 // For now, we encrypt just the share (the randomness ω_{j,k} will be sent separately)
@@ -221,7 +222,7 @@ impl Round1Executor {
                 encrypted_shares_for_j.push(gamma_jk);
                 
                 println!("Party {}: encrypted share x_{{j={},k={}}} = {} for new party {}", 
-                         self.participating_parties[j].index, j, k, x_jk, self.new_parties[k].index);
+                         self.participating_parties[j].index, j, self.new_parties[k].index, x_jk, self.new_parties[k].index);
             }
             
             encrypted_shares_evolving.push(encrypted_shares_for_j);
@@ -261,8 +262,9 @@ impl Round1Executor {
                 };
                 
                 messages_from_j.push(message);
-                println!("Created message σ̃_{{j={},k={}}} from party {} to new party {}", 
-                         j, k, self.participating_parties[j].index, self.new_parties[k as usize].index);
+                println!("Created message σ̃_{{from_party={},to_party={}}} from party {} to new party {}", 
+                         self.participating_parties[j].index, self.new_parties[k as usize].index, 
+                         self.participating_parties[j].index, self.new_parties[k as usize].index);
             }
             
             evolving_messages.push(messages_from_j);
