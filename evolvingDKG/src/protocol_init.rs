@@ -16,6 +16,7 @@ pub struct ProtocolInitializer {
     pub pki: PKI,
     pub scheme: Scheme,
     pub rng: StdRng,
+    pub original_secret: Option<BigUint>, // Store the original reconstructed secret
 }
 
 impl ProtocolInitializer {
@@ -38,6 +39,7 @@ impl ProtocolInitializer {
             pki: PKI::new(),
             scheme,
             rng,
+            original_secret: None,
         })
     }
 
@@ -351,7 +353,7 @@ impl ProtocolInitializer {
         Ok(())
     }
 
-    fn verify_dkg_reconstruction(&self, party_secrets: &[BigUint]) -> Result<()> {
+    fn verify_dkg_reconstruction(&mut self, party_secrets: &[BigUint]) -> Result<()> {
         println!("\n--- Step 9: Verifying DKG reconstruction ---");
         let mut verification_shares = Vec::new();
         for i in 0..self.t {
@@ -371,6 +373,8 @@ impl ProtocolInitializer {
             
             if reconstructed_secret == total_secret {
                 println!("\nDKG Protocol completed successfully! Reconstruction matches expected total.");
+                // Store the original secret for later verification
+                self.original_secret = Some(reconstructed_secret.clone());
             } else {
                 println!("\nDKG Protocol completed but reconstruction doesn't match expected total.");
             }
@@ -379,5 +383,10 @@ impl ProtocolInitializer {
         }
         
         Ok(())
+    }
+    
+    /// Get the original secret that was reconstructed during DKG initialization
+    pub fn get_original_secret(&self) -> Option<&BigUint> {
+        self.original_secret.as_ref()
     }
 }

@@ -2,6 +2,7 @@ use anyhow::Result;
 use num_bigint::BigUint;
 use crate::{Party, BabyJubJubPK, BabyJubJubSK, elgamal::ElGamalCiphertext, sigma_protocol::{Round2Proof, Round2Statement}, round1::EvolvingMessage, utils::{share_to_scalar, point_to_share}};
 use dusk_jubjub::{JubJubExtended, JubJubScalar, GENERATOR_EXTENDED};
+use shamir_rs;
 
 // Define share tuple structure for Round 2
 #[derive(Debug, Clone)]
@@ -35,6 +36,7 @@ pub struct Round2Executor {
     pub received_messages: Vec<Vec<EvolvingMessage>>,
     pub n: u32,
     pub ng: u32,
+    pub final_shares: Vec<OutputTuple>, // Store the final output tuples
 }
 
 impl Round2Executor {
@@ -49,6 +51,7 @@ impl Round2Executor {
             received_messages,
             n,
             ng,
+            final_shares: Vec::new(),
         }
     }
 
@@ -64,7 +67,8 @@ impl Round2Executor {
         
         // For each party Pi where i ∈ [n - ng + 1, n] (i.e., new parties)
         for (party_idx, new_party) in self.new_parties.iter().enumerate() {
-            self.process_party_round2(party_idx, new_party, start_idx, end_idx)?;
+            let output_tuple = self.process_party_round2(party_idx, new_party, start_idx, end_idx)?;
+            self.final_shares.push(output_tuple);
         }
         
         println!("\nRound 2 of Evolving DKG completed successfully!");
@@ -80,7 +84,7 @@ impl Round2Executor {
         new_party: &Party,
         start_idx: usize,
         end_idx: usize,
-    ) -> Result<()> {
+    ) -> Result<OutputTuple> {
         println!("\n--- Processing Round 2 for Party {} ---", new_party.index);
         
         // Step 1: Create share tuple sj = ((pk_k, γ_j,k)_{k∈[n-ng+1,n]}, Yj)
@@ -99,7 +103,7 @@ impl Round2Executor {
         let aggregated_encrypted_shares = self.aggregate_encrypted_shares(&share_tuples, &valid_indices, party_idx, start_idx, end_idx)?;
         
         // Step 6: Create output tuple σ_i = (sk_i, pk_i, {γ_k}_{k∈[n]\{i}}, x_i)
-        let _output_tuple = self.create_output_tuple(new_party, &aggregated_encrypted_shares, &x_i)?;
+        let output_tuple = self.create_output_tuple(new_party, &aggregated_encrypted_shares, &x_i)?;
         
         // Step 7: Generate and send Round 2 proof using sigma protocol
         self.generate_and_verify_proof(&share_tuples, &valid_indices, new_party, &decrypted_shares, &x_i, &y_i)?;
@@ -107,7 +111,8 @@ impl Round2Executor {
         // Step 8: Broadcast Y_i to all parties
         self.broadcast_commitment(new_party)?;
         
-        Ok(())
+        // Return the output tuple containing the final share
+        Ok(output_tuple)
     }
 
     fn create_share_tuples(&self, party_idx: usize, start_idx: usize, end_idx: usize) -> Result<Vec<ShareTuple>> {
@@ -313,5 +318,39 @@ impl Round2Executor {
         println!("Party {}: broadcasting Y_i commitment to all parties", new_party.index);
         println!("Round 2 completed for Party {}", new_party.index);
         Ok(())
+    }
+
+    /// Get the final shares from the new parties after Round 2
+    pub fn get_final_shares(&self) -> &[OutputTuple] {
+        &self.final_shares
+    }
+
+    /// Reconstruct the secret using the final shares from the new parties
+    pub fn reconstruct_secret_from_new_parties(&self, scheme: &shamir_rs::Scheme, threshold: usize) -> Result<BigUint> {
+        if self.final_shares.len() < threshold {
+            return Err(anyhow::anyhow!(
+                "Not enough shares for reconstruction. Have {}, need {}",
+                self.final_shares.len(),
+                threshold
+            ));
+        }
+
+        // Create shares for reconstruction using the first 'threshold' number of parties
+        // Use the actual party indices as they were used in polynomial evaluation
+        let mut reconstruction_shares = Vec::new();
+        for (i, output_tuple) in self.final_shares.iter().take(threshold).enumerate() {
+            let party_index = self.new_parties[i].index;
+            println!("Using party {} with index {} and share {} for reconstruction", 
+                     i, party_index, output_tuple.x_i);
+            let share = shamir_rs::Share {
+                index: party_index, // Use actual party indices (5, 6, 7, ...)
+                value: output_tuple.x_i.clone(),
+            };
+            reconstruction_shares.push(share);
+        }
+
+        // Reconstruct the secret
+        let reconstructed_secret = scheme.reconstruct_secret(&reconstruction_shares)?;
+        Ok(reconstructed_secret)
     }
 }
