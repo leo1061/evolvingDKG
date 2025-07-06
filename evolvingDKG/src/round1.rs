@@ -262,7 +262,7 @@ impl Round1Executor {
                 };
                 
                 messages_from_j.push(message);
-                println!("Created message σ̃_{{from_party={},to_party={}}} from party {} to new party {}", 
+                println!("Created message σ̃_{{j={},k={}}} from party {} to new party {}", 
                          self.participating_parties[j].index, self.new_parties[k as usize].index, 
                          self.participating_parties[j].index, self.new_parties[k as usize].index);
             }

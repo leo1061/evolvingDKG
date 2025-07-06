@@ -2,9 +2,13 @@ use anyhow::Result;
 use num_bigint::BigUint;
 use dusk_jubjub::{JubJubExtended, JubJubScalar, GENERATOR_EXTENDED};
 use ff::Field;
-use rand::{rngs::StdRng, RngCore};
+use rand::rngs::StdRng;
+use sha2::{Sha256, Digest};
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
+
+// Import the standalone RFC 9380 implementation from a separate file  
+use crate::rfc9380_hash_to_curve::JubJubHashToCurve;
 
 // Convert a Shamir share to a point on the BabyJubJub curve
 pub fn convert_share_to_curve_point(share: &BigUint) -> Result<(BigUint, BigUint)> {
@@ -69,41 +73,11 @@ pub fn share_to_scalar(share: &BigUint) -> Result<JubJubScalar> {
     Ok(JubJubScalar::from_bytes(&bytes).unwrap())
 }
 
-// Helper function to convert BigUint share directly to a JubJub point
-// Uses coordinate-based mapping instead of discrete logarithm  
+// RFC 9380 compliant hash-to-curve implementation for JubJub
+// Uses the standalone implementation for proper RFC compliance
 pub fn share_to_point(share: &BigUint) -> Result<JubJubExtended> {
-    
-    let mut point_bytes = [0u8; 32];
-    let share_bytes = share.to_bytes_le();
-    
-    // Use the share value as the v-coordinate (first 16 bytes)
-    let copy_len = std::cmp::min(share_bytes.len(), 16);
-    point_bytes[0..copy_len].copy_from_slice(&share_bytes[0..copy_len]);
-    
-    // Try to decode as a valid curve point
-    if let Some(affine_point) = Option::<dusk_jubjub::AffinePoint>::from(dusk_jubjub::AffinePoint::from_bytes(point_bytes)) {
-        Ok(JubJubExtended::from(affine_point))
-    } else {
-        // If the direct mapping doesn't work, use hash-to-curve approach
-        let mut hasher = DefaultHasher::new();
-        share.hash(&mut hasher);
-        let hash_val = hasher.finish();
-        
-        // Create deterministic point from hash
-        point_bytes[0..8].copy_from_slice(&hash_val.to_le_bytes());
-        
-        // Try multiple candidates until we find a valid point
-        for i in 0..=255u8 {
-            point_bytes[16] = i;
-            if let Some(affine_point) = Option::<dusk_jubjub::AffinePoint>::from(dusk_jubjub::AffinePoint::from_bytes(point_bytes)) {
-                return Ok(JubJubExtended::from(affine_point));
-            }
-        }
-        
-        // Fallback: use the share as a scalar multiplier (old approach but safe)
-        let share_scalar = share_to_scalar(share)?;
-        Ok(GENERATOR_EXTENDED * &share_scalar)
-    }
+    let h2c = JubJubHashToCurve::for_share_mapping();
+    h2c.share_to_point(share)
 }
 
 // Generate a random scalar for commitments
@@ -113,21 +87,12 @@ pub fn generate_random_scalar() -> Result<JubJubScalar> {
     Ok(JubJubScalar::random(&mut rng))
 }
 
-// Helper function to convert a JubJub point back to a BigUint share
-// Uses coordinate-based mapping instead of discrete logarithm
+// Convert a JubJub point back to a canonical representation
+// Note: This is not a true inverse of hash-to-curve (which is one-way)
+// Instead, it provides a canonical encoding of the point
 pub fn point_to_share(point: &JubJubExtended) -> Result<BigUint> {
-    
-    // Convert to affine form to get stable coordinates
-    let affine_point = dusk_jubjub::AffinePoint::from(point);
-    
-    // Get the v-coordinate bytes (the main coordinate used in encoding)
-    let point_bytes = affine_point.to_bytes();
-    
-    // Convert the first 16 bytes to BigUint (v-coordinate is the main data)
-    // This provides a fully reversible mapping without discrete logarithm
-    let share_value = BigUint::from_bytes_le(&point_bytes[0..16]);
-    
-    Ok(share_value)
+    let h2c = JubJubHashToCurve::for_share_mapping();
+    Ok(h2c.point_to_canonical(point))
 }
 
 #[cfg(test)]
@@ -136,8 +101,8 @@ mod tests {
     use group::GroupEncoding;
     
     #[test]
-    fn test_reversible_mapping() {
-        // Test round-trip conversion for various share values
+    fn test_hash_to_curve_deterministic() {
+        // Test that hash-to-curve is deterministic
         let test_values = vec![
             BigUint::from(0u64),
             BigUint::from(1u64),
@@ -147,43 +112,48 @@ mod tests {
             BigUint::from_bytes_le(&[0xFF; 8]),  // Large value
         ];
         
-        for original_share in test_values {
-            println!("Testing share: {}", original_share);
+        for share in test_values {
+            // Convert share to point multiple times
+            let point1 = share_to_point(&share).expect("Failed to convert share to point");
+            let point2 = share_to_point(&share).expect("Failed to convert share to point");
             
-            // Convert share to point
-            let point = share_to_point(&original_share).expect("Failed to convert share to point");
-            
-            // Convert point back to share
-            let recovered_share = point_to_share(&point).expect("Failed to convert point to share");
-            
-            println!("Original: {}, Recovered: {}", original_share, recovered_share);
-            
-            // For coordinate-based mapping, we don't expect exact equality
-            // but the mapping should be deterministic and reversible
+            // Should be identical (deterministic)
             assert_eq!(
-                share_to_point(&recovered_share).unwrap().to_bytes(),
-                point.to_bytes(),
-                "Mapping is not deterministic for share: {}", original_share
+                point1.to_bytes(), 
+                point2.to_bytes(),
+                "Hash-to-curve is not deterministic for share: {}", share
+            );
+            
+            // Test that different shares produce different points
+            let different_share = &share + BigUint::from(1u64);
+            let different_point = share_to_point(&different_share).expect("Failed to convert different share");
+            
+            assert_ne!(
+                point1.to_bytes(),
+                different_point.to_bytes(),
+                "Different shares should produce different points"
             );
         }
     }
     
     #[test]
-    fn test_deterministic_mapping() {
+    fn test_canonical_point_encoding() {
         let share = BigUint::from(12345u64);
         
-        // Convert to point multiple times
-        let point1 = share_to_point(&share).unwrap();
-        let point2 = share_to_point(&share).unwrap();
+        // Convert to point
+        let point = share_to_point(&share).unwrap();
         
-        // Should be identical
-        assert_eq!(point1.to_bytes(), point2.to_bytes(), "Mapping is not deterministic");
+        // Convert to canonical representation multiple times
+        let canonical1 = point_to_share(&point).unwrap();
+        let canonical2 = point_to_share(&point).unwrap();
         
-        // Convert back multiple times
-        let recovered1 = point_to_share(&point1).unwrap();
-        let recovered2 = point_to_share(&point2).unwrap();
+        // Should be identical (deterministic canonical encoding)
+        assert_eq!(canonical1, canonical2, "Canonical encoding is not deterministic");
         
-        // Should be identical
-        assert_eq!(recovered1, recovered2, "Reverse mapping is not deterministic");
+        // Test that the same point always gives the same canonical form
+        let same_point = share_to_point(&share).unwrap();
+        let canonical3 = point_to_share(&same_point).unwrap();
+        
+        assert_eq!(canonical1, canonical3, "Same points should have same canonical encoding");
     }
 }

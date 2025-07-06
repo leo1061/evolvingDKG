@@ -55,4 +55,5 @@ evolvingDKG/remove-emoji.sh
 evolvingDKG/sigma.txt
 circom-build/
 evolvingDKG/tags
-evolvingDKG/src/TODO.md
+evolvingDKG/TODO.md
+evolvingDKG/improvements.md

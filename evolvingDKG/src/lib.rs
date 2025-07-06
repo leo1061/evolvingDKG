@@ -15,6 +15,7 @@ pub mod utils;
 pub mod protocol_init;
 pub mod round1;
 pub mod round2;
+pub mod rfc9380_hash_to_curve;
 use elgamal::ElGamalCiphertext;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Hash)]
