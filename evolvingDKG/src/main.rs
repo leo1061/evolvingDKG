@@ -11,12 +11,13 @@ use rayon::prelude::*;
 
 fn main() -> Result<()> {
     // Protocol parameters
-    let n_array = [5,3,4]; // number of parties in each generation
+    let ng_array = [5,3,4]; // number of NEW parties in each generation
     let t_array = [3,2,2]; // threshold for each generation
     let g_max = 2; // total generations after initialization
 
     let mut g = 0; // current generation
-    let mut n = n_array[0]; // total number of parties
+    let mut ng = ng_array[0]; // number of new parties in current generation
+    let mut n = ng; // total number of parties (initially n = ng for generation 0)
     let mut t = t_array[0]; // threshold for reconstruction
     
 
@@ -28,7 +29,7 @@ fn main() -> Result<()> {
     println!("\nGenerating keys for each party...");
     
     // Create all key generation tasks for parallel execution
-    let key_tasks: Vec<usize> = (0..n).collect();
+    let key_tasks: Vec<usize> = (0..ng).collect();
     
     // Generate keys in parallel
     let key_results: Result<Vec<Party>> = key_tasks
@@ -64,7 +65,7 @@ fn main() -> Result<()> {
     println!("\nUsing prime field of size: {}", prime);
     
     // Create the Shamir scheme
-    let scheme = Scheme::new(t as usize, n as usize, prime.clone())?;
+    let scheme = Scheme::new(t as usize, ng as usize, prime.clone())?;
     
     // Initialize RNG for generating random secrets
     let mut rng = StdRng::seed_from_u64(0x12345678);
@@ -75,7 +76,7 @@ fn main() -> Result<()> {
     // Initialization: Initialization: Step 2: Each party creates a random secret
     println!("\n--- Initialization: Initialization: Step 2: Each party creates a random secret ---");
     let mut party_secrets: Vec<BigUint> = Vec::new();
-    for i in 0..n {
+    for i in 0..ng {
         let secret = BigUint::from(rng.gen::<u64>() % 1000000); // Random secret for demo
         party_secrets.push(secret.clone());
         println!("Party {} generated secret: {}", i, secret);
@@ -84,7 +85,7 @@ fn main() -> Result<()> {
     // Initialization: Step 3: Each party creates secret shares for other parties
     println!("\n--- Initialization: Step 3: Creating secret shares ---");
     let mut all_shares: Vec<Vec<shamir_rs::Share>> = Vec::new();
-    for i in 0..n {
+    for i in 0..ng {
         let shares = scheme.split_secret(&party_secrets[i as usize]);
         all_shares.push(shares.clone());
         println!("Party {} created {} shares of their secret", i, shares.len());
@@ -94,9 +95,9 @@ fn main() -> Result<()> {
     println!("\n--- Initialization: Step 4: Encrypting shares with ElGamal ---");
     let mut encrypted_shares: Vec<Vec<Option<elgamal::ElGamalCiphertext>>> = Vec::new();
     
-    for i in 0..n {
+    for i in 0..ng {
         let mut party_encrypted_shares = Vec::new();
-        for j in 0..n {
+        for j in 0..ng {
             // Get recipient's public key from PKI
             let recipient_pk = pki.get_public_key(j as usize).unwrap();
             let jubjub_pk: JubJubExtended = recipient_pk.clone().into();
@@ -121,8 +122,8 @@ fn main() -> Result<()> {
     
     // Create all tasks for parallel execution
     let mut proof_tasks: Vec<(usize, usize)> = Vec::new();
-    for i in 0..n {
-        for j in 0..n {
+    for i in 0..ng {
+        for j in 0..ng {
             proof_tasks.push((i as usize, j as usize));
         }
     }
@@ -132,7 +133,7 @@ fn main() -> Result<()> {
         .par_iter()
         .map(|&(i, j)| {
             // Create a new RNG for this thread using a deterministic seed
-            let mut thread_rng = StdRng::seed_from_u64(0x12345678 + (i * n as usize + j) as u64);
+            let mut thread_rng = StdRng::seed_from_u64(0x12345678 + (i * ng as usize + j) as u64);
             
             // Get the actual share value and recipient's public key
             let share_value = &all_shares[i][j].value;
@@ -164,18 +165,18 @@ fn main() -> Result<()> {
         .collect();
     
     // Reconstruct the proofs vector from parallel results
-    let mut proofs: Vec<Vec<(Value, Value)>> = vec![vec![(serde_json::json!(null), serde_json::json!(null)); n as usize]; n as usize];
+    let mut proofs: Vec<Vec<(Value, Value)>> = vec![vec![(serde_json::json!(null), serde_json::json!(null)); ng as usize]; ng as usize];
     for ((i, j), (proof, public_inputs)) in proof_results {
         proofs[i][j] = (proof, public_inputs);
     }
     
     // Initialization: Step 6: Each party sends encrypted shares and proofs (simulate network)
     println!("\n--- Initialization: Step 6: Distributing encrypted shares and proofs ---");
-    let mut received_encrypted_shares: Vec<Vec<Option<elgamal::ElGamalCiphertext>>> = vec![Vec::new(); n as usize];
-    let mut received_proofs: Vec<Vec<(Value, Value)>> = vec![Vec::new(); n as usize];
+    let mut received_encrypted_shares: Vec<Vec<Option<elgamal::ElGamalCiphertext>>> = vec![Vec::new(); ng as usize];
+    let mut received_proofs: Vec<Vec<(Value, Value)>> = vec![Vec::new(); ng as usize];
     
-    for sender in 0..n {
-        for receiver in 0..n {
+    for sender in 0..ng {
+        for receiver in 0..ng {
             if let Some(ref encrypted_share) = encrypted_shares[sender as usize][receiver as usize] {
                 received_encrypted_shares[receiver as usize].push(Some(encrypted_share.clone()));
                 received_proofs[receiver as usize].push(proofs[sender as usize][receiver as usize].clone());
@@ -192,8 +193,8 @@ fn main() -> Result<()> {
     
     // Create all verification tasks for parallel execution
     let mut verification_tasks: Vec<(usize, usize)> = Vec::new();
-    for receiver in 0..n {
-        for sender in 0..n {
+    for receiver in 0..ng {
+        for sender in 0..ng {
             verification_tasks.push((receiver as usize, sender as usize));
         }
     }
@@ -228,7 +229,7 @@ fn main() -> Result<()> {
         .collect();
     
     // Reconstruct the valid_parties matrix from parallel results
-    let mut valid_parties: Vec<Vec<bool>> = vec![vec![true; n as usize]; n as usize];
+    let mut valid_parties: Vec<Vec<bool>> = vec![vec![true; ng as usize]; ng as usize];
     for ((receiver, sender), is_valid) in verification_results {
         valid_parties[receiver][sender] = is_valid;
     }
@@ -241,21 +242,21 @@ fn main() -> Result<()> {
     println!("Total DKG secret (sum of all party secrets): {}", total_secret);
     
     // For each party, compute their final share by summing shares sent to them by all parties
-    for party_idx in 0..n {
+    for party_idx in 0..ng {
         let mut party_final_share = BigUint::from(0u32);
         
         // Sum all shares sent to this party by all other parties (including themselves)
-        for sender_idx in 0..n {
+        for sender_idx in 0..ng {
             // Check if sender is considered valid by majority
-            let validations: usize = (0..n).map(|i| if valid_parties[i as usize][sender_idx as usize] { 1 } else { 0 }).sum();
-            if validations >= (n as usize / 2) {
+            let validations: usize = (0..ng).map(|i| if valid_parties[i as usize][sender_idx as usize] { 1 } else { 0 }).sum();
+            if validations >= (ng as usize / 2) {
                 // Add the share that sender_idx intended for party_idx
                 party_final_share += &all_shares[sender_idx as usize][party_idx as usize].value;
                 println!("Party {} received share {} from party {} (validated by {}/{} parties)", 
-                    party_idx, all_shares[sender_idx as usize][party_idx as usize].value, sender_idx, validations, n);
+                    party_idx, all_shares[sender_idx as usize][party_idx as usize].value, sender_idx, validations, ng);
             } else {
                 println!("Party {} ignoring share from party {} (only validated by {}/{} parties)", 
-                    party_idx, sender_idx, validations, n);
+                    party_idx, sender_idx, validations, ng);
             }
         }
         
@@ -293,7 +294,8 @@ fn main() -> Result<()> {
 
     // Increment generation
     g += 1;
-    n = n_array[g as usize];
+    ng = ng_array[g as usize]; // number of new parties for this generation
+    n = n + ng; // total parties = previous total + new parties
     t = t_array[g as usize];
 
     // ======================================================================
@@ -301,7 +303,8 @@ fn main() -> Result<()> {
     // ======================================================================
     println!("\n=== Round 1: Evolving DKG Protocol ===");
     println!("Generation: {}", g);
-    println!("Parties in generation {}: {}", g, n);
+    println!("New parties in generation {}: {}", g, ng);
+    println!("Total parties after generation {}: {}", g, n);
     println!("Threshold for generation {}: {}", g, t);
     
     // Round 1 - Let I be a set of parties in generation g-1 such that |I| = t_array[g]
@@ -313,11 +316,11 @@ fn main() -> Result<()> {
     println!("Selected parties: {:?}", participating_parties.iter().map(|p| p.index).collect::<Vec<_>>());
     
     // Initialize new parties for generation g (N[g] additional parties)
-    println!("\nInitializing {} new parties for generation {}", n, g);
+    println!("\nInitializing {} new parties for generation {}", ng, g);
     let mut new_parties = Vec::new();
     
     // Create new party tasks for parallel execution
-    let new_party_tasks: Vec<usize> = (0..n).collect();
+    let new_party_tasks: Vec<usize> = (0..ng).collect();
     
     // Generate keys for new parties in parallel
     let new_key_results: Result<Vec<Party>> = new_party_tasks
@@ -410,12 +413,14 @@ fn main() -> Result<()> {
     for (j, polynomial) in party_polynomials.iter().enumerate() {
         let mut shares_for_party_j = Vec::new();
         
-        // For each P_k with k ∈ [n] (all new parties), create x_{j,k} = G_j(k)
-        for k in 1..=n {
-            let x_jk = evaluate_polynomial(polynomial, k as u32);
+        // For each P_k with k ∈ [n-ng+1, n] (all new parties), create x_{j,k} = G_j(k)
+        // New parties have global indices from (n-ng) to (n-1)
+        for k_local in 0..ng {
+            let k_global = (n - ng + k_local) as u32; // Global party index
+            let x_jk = evaluate_polynomial(polynomial, k_global);
             shares_for_party_j.push(x_jk.clone());
             println!("Party {}: x_{{j={},k={}}} = G_{}({}) = {}", 
-                     participating_parties[j].index, j, k, j, k, x_jk);
+                     participating_parties[j].index, j, k_global, j, k_global, x_jk);
         }
         
         polynomial_shares.push(shares_for_party_j);
@@ -503,14 +508,14 @@ fn main() -> Result<()> {
     for (j, _) in participating_parties.iter().enumerate() {
         let mut messages_from_j = Vec::new();
         
-        for k in 0..n {
+        for k in 0..ng {
             // Create σ̃_{j,k} = {Y_j, {γ_{j,i}}_{i∈[n]\{k}}, γ_{j,k}}
             let y_j = party_commitments[j];
             let gamma_k = encrypted_shares_evolving[j][k].clone();
             
             // Create {γ_{j,i}}_{i∈[n]\{k}} (all encrypted shares except for party k)
             let mut gamma_others = Vec::new();
-            for i in 0..n {
+            for i in 0..ng {
                 if i != k {
                     gamma_others.push(encrypted_shares_evolving[j][i].clone());
                 }
@@ -564,7 +569,7 @@ fn main() -> Result<()> {
     println!("\n--- Step 7: Broadcasting messages to new parties ---");
     
     // Simulate network broadcast
-    let mut received_evolving_messages: Vec<Vec<EvolvingMessage>> = vec![Vec::new(); n];
+    let mut received_evolving_messages: Vec<Vec<EvolvingMessage>> = vec![Vec::new(); ng];
     
     for (j, messages_from_j) in evolving_messages.iter().enumerate() {
         for (k, message) in messages_from_j.iter().enumerate() {
@@ -589,9 +594,10 @@ fn main() -> Result<()> {
     println!("Processing encrypted shares for parties in range [n - ng + 1, n]");
     
     // Calculate the range of new parties that need to process shares
-    let ng = n; // Number of parties in the current generation
-    let start_idx = (n - ng) as usize; // In our case, this is 0 for the new parties
-    let end_idx = n as usize; // All new parties
+    // New parties have indices from n-ng+1 to n in the global numbering
+    // But in our new_parties vector, they are indexed from 0 to ng-1
+    let start_idx = n - ng; // Start of new party range in global numbering
+    let end_idx = n; // End of new party range in global numbering
     
     println!("Processing parties in range [{}, {}]", start_idx, end_idx - 1);
     
@@ -606,7 +612,7 @@ fn main() -> Result<()> {
             let mut pk_gamma_pairs = Vec::new();
             
             // Create pairs of (pk_k, γ_j,k) for all k in the range
-            for k in start_idx..end_idx {
+            for k in 0..ng {
                 let pk_k = &new_parties[k].share.pk;
                 let gamma_jk = if k == party_idx {
                     &message.gamma_k // γ_j,i for this party
@@ -669,7 +675,7 @@ fn main() -> Result<()> {
         // Step 5: Aggregate encrypted shares - Sum all encrypted shares γ_k = Σ_{j∈I'} γ_{j,k}
         let mut aggregated_encrypted_shares: Vec<ElGamalCiphertext> = Vec::new();
         
-        for k in start_idx..end_idx {
+        for k in 0..ng {
             if k == party_idx {
                 continue; // Skip self
             }
