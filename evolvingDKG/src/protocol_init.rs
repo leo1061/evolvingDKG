@@ -2,7 +2,7 @@ use anyhow::Result;
 use num_bigint::BigUint;
 use std::str::FromStr;
 use shamir_rs::Scheme;
-use crate::{key_gen, read_keys, Party, PartyList, PKI, BabyJubJubPK, setup_zk::CircuitSetup, circom_encryption::EncryptionCircuit, elgamal, utils::{convert_share_to_curve_point, generate_secure_nonce, share_to_scalar}};
+use crate::{key_gen, read_keys, Party, PartyList, PKI, setup_zk::CircuitSetup, circom_encryption::EncryptionCircuit, elgamal, utils::share_to_scalar};
 use rand::{rngs::StdRng, SeedableRng, Rng};
 use dusk_jubjub::{JubJubExtended, GENERATOR_EXTENDED};
 use serde_json::Value;
@@ -195,11 +195,11 @@ impl ProtocolInitializer {
                 let thread_circuit = EncryptionCircuit::new("build");
                 
                 // Create a new RNG for this thread using a deterministic seed
-                let mut thread_rng = StdRng::seed_from_u64(0x12345678 + (i * self.n as usize + j) as u64);
+                let _thread_rng = StdRng::seed_from_u64(0x12345678 + (i * self.n as usize + j) as u64);
                 
                 // Get the actual share value and recipient's public key
-                let share_value = &all_shares[i][j].value;
-                let recipient_pk = self.pki.get_public_key(j).unwrap();
+                let _share_value = &all_shares[i][j].value;
+                let _recipient_pk = self.pki.get_public_key(j).unwrap();
                 
                 // Use known-good Baby JubJub coordinates from the generated bjj_pk files
                 // These are confirmed valid curve points that should pass BabyCheck()

@@ -1,7 +1,7 @@
 use anyhow::Result;
 use evolvingDKG::schnorr_lib::*;
-use evolvingDKG::{BabyJubJubSK, BabyJubJubPK};
-use dusk_jubjub::{JubJubScalar, GENERATOR_EXTENDED};
+use evolvingDKG::BabyJubJubSK;
+use dusk_jubjub::JubJubScalar;
 use ff::Field;
 
 fn main() -> Result<()> {

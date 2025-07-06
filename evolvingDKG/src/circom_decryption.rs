@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use serde_json::Value;
+use serde_json::{json, Value};
 use anyhow::{Result, Context};
 
 pub struct DecryptionCircuit {
@@ -155,6 +155,7 @@ mod tests {
     use super::*;
     use tempfile::tempdir;
     use std::fs;
+    use crate::circom_encryption::EncryptionCircuit;
 
     fn setup_test_circuit() -> (DecryptionCircuit, EncryptionCircuit, tempfile::TempDir) {
         let temp_dir = tempdir().unwrap();
@@ -369,7 +370,7 @@ mod tests {
 
     #[test]
     fn test_decryption_circuit() {
-        let (decryption_circuit, encryption_circuit, _temp_dir) = setup_test_circuit();
+        let (decryption_circuit, _encryption_circuit, _temp_dir) = setup_test_circuit();
         
         // Skip this test since we need actual circuit compilation for full integration
         // For now, just test that the circuit structures are created correctly

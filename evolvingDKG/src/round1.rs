@@ -180,7 +180,7 @@ impl Round1Executor {
             let mut shares_for_party_j = Vec::new();
             
             // For each new party P_k, create x_{j,k} = G_j(k) where k is the actual party index
-            for (local_k, new_party) in self.new_parties.iter().enumerate() {
+            for (_local_k, new_party) in self.new_parties.iter().enumerate() {
                 let actual_party_k = new_party.index;
                 let x_jk = evaluate_polynomial(polynomial, actual_party_k);
                 shares_for_party_j.push(x_jk.clone());

@@ -341,7 +341,7 @@ fn main() -> Result<()> {
     println!("Test 1 - Wrong claimed sum: {} (should be false)", wrong_sum_valid);
     
     // Test 2: Wrong public key
-    let (wrong_sk, wrong_pk) = generate_keypair(&mut rng);
+    let (_wrong_sk, wrong_pk) = generate_keypair(&mut rng);
     let wrong_statement2 = BatchDecryptionStatement {
         public_key: wrong_pk.into(),
         ciphertexts: statement.ciphertexts.clone(),

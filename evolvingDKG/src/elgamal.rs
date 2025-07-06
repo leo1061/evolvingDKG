@@ -55,6 +55,7 @@ pub fn generate_keypair(rng: &mut StdRng) -> (JubJubScalar, JubJubExtended) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rand::SeedableRng;
     
     #[test]
     fn test_elgamal_encryption_decryption() {

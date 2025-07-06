@@ -225,17 +225,17 @@ mod tests {
         let build_dir = setup_test_environment()?;
         let circuit = EncryptionCircuit::new(&build_dir);
 
-        // Example input values for ElGamal encryption
-        // These are example values - in a real test, you would use actual valid points on the BabyJubjub curve
+        // Use valid BabyJubJub curve points from the codebase
+        // These coordinates are known to be valid and pass BabyCheck constraints
         let input = json!({
             "message": [
-                "5299619240641551281634865583518297031282874472190772894086521144482721001553",
-                "16950150798460657717958625567821834550301663161624707787222815936182638968203"
+                "11128950044920784183588259988484266235709953250315622482802310296068759231254",
+                "19518390247966390782527805851770734036490666722979686480142134693314551745629"
             ],
-            "nonceKey": "123456789",
+            "nonceKey": "12345",
             "publicKey": [
-                "5299619240641551281634865583518297030282874472190772894086521144482721001553",
-                "16950150798460657717958625567821834550301663161624707787222815936182638968203"
+                "11128950044920784183588259988484266235709953250315622482802310296068759231254",
+                "19518390247966390782527805851770734036490666722979686480142134693314551745629"
             ]
         });
 

@@ -3,7 +3,6 @@ use num_bigint::BigUint;
 use dusk_jubjub::{JubJubExtended, JubJubScalar, GENERATOR_EXTENDED};
 use ff::Field;
 use sha2::{Sha256, Digest};
-use group::GroupEncoding;
 use crate::{BabyJubJubPK, BabyJubJubSK, elgamal::ElGamalCiphertext};
 
 // Round 2 Sigma Protocol for Relation R_L

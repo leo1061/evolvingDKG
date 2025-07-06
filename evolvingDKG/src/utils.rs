@@ -1,9 +1,8 @@
 use anyhow::Result;
 use num_bigint::BigUint;
-use dusk_jubjub::{JubJubExtended, JubJubScalar, GENERATOR_EXTENDED};
+use dusk_jubjub::{JubJubExtended, JubJubScalar};
 use ff::Field;
 use rand::rngs::StdRng;
-use sha2::{Sha256, Digest};
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 

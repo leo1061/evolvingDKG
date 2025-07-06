@@ -3,9 +3,7 @@
 
 use anyhow::Result;
 use dusk_jubjub::{JubJubExtended, JubJubScalar, GENERATOR_EXTENDED, AffinePoint};
-use ff::Field;
 use sha2::{Sha256, Digest};
-use group::GroupEncoding;
 
 /// RFC 9380 Hash-to-Curve Implementation for JubJub
 /// 
@@ -19,7 +17,7 @@ pub struct JubJubHashToCurve {
     /// Domain separation tag (DST) for this hash-to-curve instance
     dst: Vec<u8>,
     /// Security parameter k (should be 128 for 128-bit security)
-    k: usize,
+    _k: usize,
     /// Length of hash output in bytes (2 * ceil((ceil(log2(q)) + k) / 8))
     l: usize,
 }
@@ -29,7 +27,7 @@ impl JubJubHashToCurve {
     pub fn new(dst: &[u8]) -> Self {
         Self {
             dst: dst.to_vec(),
-            k: 128,  // 128-bit security
+            _k: 128,  // 128-bit security
             l: 64,   // 64 bytes for wide reduction
         }
     }
@@ -237,7 +235,7 @@ impl JubJubHashToCurve {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use hex;
+    use group::GroupEncoding;
 
     #[test]
     fn test_hash_to_curve_basic() {
