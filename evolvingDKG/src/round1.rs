@@ -1,5 +1,6 @@
 use anyhow::Result;
 use num_bigint::BigUint;
+use std::str::FromStr;
 use crate::{key_gen, read_keys, Party, PKI, elgamal, utils::share_to_point};
 use rand::{rngs::StdRng, Rng};
 use dusk_jubjub::JubJubExtended;
@@ -164,28 +165,29 @@ impl Round1Executor {
         println!("\n--- Step 3: Evaluate polynomials G_j(k) for each party k ---");
         let mut polynomial_shares: Vec<Vec<BigUint>> = Vec::new(); // [j][k] = x_{j,k}
         
-        // Helper function to evaluate polynomial at point x
-        let evaluate_polynomial = |coeffs: &[BigUint], x: u32| -> BigUint {
+        // Helper function to evaluate polynomial at point x with modular arithmetic
+        let evaluate_polynomial = |coeffs: &[BigUint], x: u32| -> Result<BigUint> {
             let mut result = BigUint::from(0u32);
             let x_big = BigUint::from(x);
+            let prime = BigUint::from_str("340282366920938463463374607431768211297")?;
             
-            for (i, coeff) in coeffs.iter().enumerate() {
-                let term = coeff * x_big.pow(i as u32);
-                result += term;
+            for coeff in coeffs.iter().rev() {
+                result = (result * &x_big + coeff) % &prime;
             }
-            result
+            Ok(result)
         };
         
         for (j, polynomial) in party_polynomials.iter().enumerate() {
             let mut shares_for_party_j = Vec::new();
             
-            // For each new party P_k, create x_{j,k} = G_j(k) where k is the actual party index
-            for (_local_k, new_party) in self.new_parties.iter().enumerate() {
-                let actual_party_k = new_party.index;
-                let x_jk = evaluate_polynomial(polynomial, actual_party_k);
+            // For each new party P_k, create x_{j,k} = G_j(k) where k is sequential index (1, 2, 3, ...)
+            // This ensures consistency with Shamir secret sharing reconstruction
+            for (local_k, new_party) in self.new_parties.iter().enumerate() {
+                let sequential_k = (local_k + 1) as u32; // Use sequential indices (1, 2, 3, ...)
+                let x_jk = evaluate_polynomial(polynomial, sequential_k)?;
                 shares_for_party_j.push(x_jk.clone());
                 println!("Party {}: x_{{j={},k={}}} = G_{}({}) = {}", 
-                         self.participating_parties[j].index, j, actual_party_k, j, actual_party_k, x_jk);
+                         self.participating_parties[j].index, j, new_party.index, j, sequential_k, x_jk);
             }
             
             polynomial_shares.push(shares_for_party_j);

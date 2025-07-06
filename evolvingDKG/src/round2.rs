@@ -1,5 +1,6 @@
 use anyhow::Result;
 use num_bigint::BigUint;
+use std::str::FromStr;
 use crate::{Party, BabyJubJubPK, BabyJubJubSK, elgamal::ElGamalCiphertext, sigma_protocol::{Round2Proof, Round2Statement}, round1::EvolvingMessage, utils::{share_to_scalar, point_to_share}};
 use dusk_jubjub::{JubJubExtended, JubJubScalar, GENERATOR_EXTENDED};
 use shamir_rs;
@@ -34,8 +35,8 @@ pub struct ZKMessage {
 pub struct Round2Executor {
     pub new_parties: Vec<Party>,
     pub received_messages: Vec<Vec<EvolvingMessage>>,
-    pub n: u32,
-    pub ng: u32,
+    pub total_parties: u32, // n in main.rs
+    pub new_parties_count: u32, // ng in main.rs
     pub final_shares: Vec<OutputTuple>, // Store the final output tuples
 }
 
@@ -43,27 +44,27 @@ impl Round2Executor {
     pub fn new(
         new_parties: Vec<Party>,
         received_messages: Vec<Vec<EvolvingMessage>>,
-        n: u32,
-        ng: u32,
+        total_parties: u32,
+        new_parties_count: u32,
     ) -> Self {
         Round2Executor {
             new_parties,
             received_messages,
-            n,
-            ng,
+            total_parties,
+            new_parties_count,
             final_shares: Vec::new(),
         }
     }
 
     pub fn execute_round2(&mut self) -> Result<()> {
         println!("\n=== Round 2: Evolving DKG Protocol ===");
-        println!("Processing encrypted shares for parties in range [n - ng + 1, n]");
+        println!("Processing encrypted shares for new parties (global indices [{} - {} + 1, {}])", self.total_parties, self.new_parties_count, self.total_parties);
         
-        // Calculate the range of new parties that need to process shares
-        let start_idx = (self.n - self.ng) as usize; // In our case, this is 0 for the new parties
-        let end_idx = self.n as usize; // All new parties
+        // Calculate the global range of new parties that need to process shares
+        let start_idx = (self.total_parties - self.new_parties_count) as usize; // Global index where new parties start
+        let end_idx = self.total_parties as usize; // Global index where new parties end (exclusive)
         
-        println!("Processing parties in range [{}, {}]", start_idx, end_idx - 1);
+        println!("Processing new parties with global indices in range [{}, {}]", start_idx, end_idx - 1);
         
         // For each party Pi where i ∈ [n - ng + 1, n] (i.e., new parties)
         for (party_idx, new_party) in self.new_parties.iter().enumerate() {
@@ -100,7 +101,7 @@ impl Round2Executor {
         let (x_i, y_i) = self.compute_final_share(&decrypted_shares, new_party)?;
         
         // Step 5: Aggregate encrypted shares - Sum all encrypted shares γ_k = Σ_{j∈I'} γ_{j,k}
-        let aggregated_encrypted_shares = self.aggregate_encrypted_shares(&share_tuples, &valid_indices, party_idx, start_idx, end_idx)?;
+        let aggregated_encrypted_shares = self.aggregate_encrypted_shares(&share_tuples, &valid_indices, party_idx, new_party, start_idx, end_idx)?;
         
         // Step 6: Create output tuple σ_i = (sk_i, pk_i, {γ_k}_{k∈[n]\{i}}, x_i)
         let output_tuple = self.create_output_tuple(new_party, &aggregated_encrypted_shares, &x_i)?;
@@ -121,15 +122,26 @@ impl Round2Executor {
         for (_j, message) in self.received_messages[party_idx].iter().enumerate() {
             let mut pk_gamma_pairs = Vec::new();
             
-            // Create pairs of (pk_k, γ_j,k) for all k in the range
-            for k in start_idx..end_idx {
-                let pk_k = &self.new_parties[k].share.pk;
-                let gamma_jk = if k == party_idx {
-                    &message.gamma_k // γ_j,i for this party
+            // Create pairs of (pk_k, γ_j,k) for all k in the range of new parties
+            for k_global in start_idx..end_idx { // k_global is the global index of the target new party
+                let k_relative = k_global - start_idx; // k_relative is the 0-indexed position in new_parties vector
+
+                let pk_k = &self.new_parties[k_relative].share.pk; // Public key of the target new party
+
+                let gamma_jk = if k_global == message.recipient_k_index as usize {
+                    // If the target party k_global is the recipient of this message, use gamma_k
+                    &message.gamma_k
                 } else {
-                    // Find the corresponding γ_j,k from gamma_others
-                    let other_idx = if k < party_idx { k } else { k - 1 };
-                    &message.gamma_others[other_idx]
+                    // Otherwise, find it in gamma_others.
+                    // The index in gamma_others depends on whether k_relative is before or after recipient_k_index (relative)
+                    let recipient_k_relative = (message.recipient_k_index - (self.total_parties - self.new_parties_count)) as usize; // Convert global recipient index to relative
+
+                    let other_gamma_idx = if k_relative < recipient_k_relative {
+                        k_relative
+                    } else {
+                        k_relative - 1
+                    };
+                    &message.gamma_others[other_gamma_idx]
                 };
                 pk_gamma_pairs.push((pk_k.clone(), gamma_jk.clone()));
             }
@@ -209,7 +221,12 @@ impl Round2Executor {
     }
 
     fn compute_final_share(&self, decrypted_shares: &[BigUint], new_party: &Party) -> Result<(BigUint, JubJubExtended)> {
-        let x_i: BigUint = decrypted_shares.iter().sum();
+        let prime = BigUint::from_str("340282366920938463463374607431768211297")?;
+        let mut x_i = BigUint::from(0u32);
+        for share in decrypted_shares {
+            x_i = (x_i + share) % &prime;
+        }
+        
         let x_i_scalar = share_to_scalar(&x_i)?;
         let y_i = GENERATOR_EXTENDED * &x_i_scalar; // Y_i = g^{x_i}
         
@@ -224,27 +241,31 @@ impl Round2Executor {
         share_tuples: &[ShareTuple],
         valid_indices: &[usize],
         party_idx: usize,
+        new_party: &Party,
         start_idx: usize,
         end_idx: usize,
     ) -> Result<Vec<ElGamalCiphertext>> {
         let mut aggregated_encrypted_shares: Vec<ElGamalCiphertext> = Vec::new();
         
-        for k in start_idx..end_idx {
-            if k == party_idx {
+        for k_global in start_idx..end_idx {
+            let k_relative = k_global - start_idx;
+
+            if k_global == new_party.index as usize {
                 continue; // Skip self
             }
             
-            // Sum all γ_{j,k} for this k across all valid j
+            // Sum all γ_{j,k_global} for this k_global across all valid j
             let mut sum_c1 = JubJubExtended::default();
             let mut sum_c2 = JubJubExtended::default();
             
             for j_idx in valid_indices {
                 let share_tuple = &share_tuples[*j_idx];
-                
-                // Find the gamma for party k in this share tuple
+                let message = &self.received_messages[party_idx][*j_idx]; // Get the original message for context
+
+                // Find the gamma for party k_global in this share tuple
                 if let Some((_, gamma_jk)) = share_tuple.pk_gamma_pairs
                     .iter()
-                    .find(|(pk, _)| pk.x == self.new_parties[k].share.pk.x && pk.y == self.new_parties[k].share.pk.y) {
+                    .find(|(pk, _)| pk.x == self.new_parties[k_relative].share.pk.x && pk.y == self.new_parties[k_relative].share.pk.y) {
                     sum_c1 = sum_c1 + gamma_jk.c1;
                     sum_c2 = sum_c2 + gamma_jk.c2;
                 }
@@ -254,7 +275,7 @@ impl Round2Executor {
         }
         
         println!("Party {}: aggregated {} encrypted shares for other parties", 
-                 party_idx, aggregated_encrypted_shares.len());
+                 new_party.index, aggregated_encrypted_shares.len());
         
         Ok(aggregated_encrypted_shares)
     }
@@ -326,7 +347,7 @@ impl Round2Executor {
     }
 
     /// Reconstruct the secret using the final shares from the new parties
-    pub fn reconstruct_secret_from_new_parties(&self, scheme: &shamir_rs::Scheme, threshold: usize) -> Result<BigUint> {
+    pub fn reconstruct_secret_from_new_parties(&self, scheme: &shamir_rs::Scheme, threshold: usize, party_indices: &[u32]) -> Result<BigUint> {
         if self.final_shares.len() < threshold {
             return Err(anyhow::anyhow!(
                 "Not enough shares for reconstruction. Have {}, need {}",
@@ -336,14 +357,13 @@ impl Round2Executor {
         }
 
         // Create shares for reconstruction using the first 'threshold' number of parties
-        // Use the actual party indices as they were used in polynomial evaluation
         let mut reconstruction_shares = Vec::new();
         for (i, output_tuple) in self.final_shares.iter().take(threshold).enumerate() {
-            let party_index = self.new_parties[i].index;
+            let party_index = party_indices[i];
             println!("Using party {} with index {} and share {} for reconstruction", 
                      i, party_index, output_tuple.x_i);
             let share = shamir_rs::Share {
-                index: party_index, // Use actual party indices (5, 6, 7, ...)
+                index: party_index as u32, // Use the actual party index
                 value: output_tuple.x_i.clone(),
             };
             reconstruction_shares.push(share);

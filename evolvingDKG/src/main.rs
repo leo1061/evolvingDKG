@@ -11,17 +11,21 @@ fn main() -> Result<()> {
     let _g_max = 2; // total generations after initialization
 
     let mut g = 0; // current generation
-    let mut n = n_array[0]; // total number of parties
+    let mut total_parties = 0; // total number of parties accumulated
     let mut t = t_array[0]; // threshold for reconstruction
 
+    // Generation 0 (Initialization)
+    let new_parties_current_gen = n_array[0]; // Number of new parties in this generation
+    total_parties += new_parties_current_gen; // Update total parties
+
     // Initialize the protocol
-    let mut initializer = ProtocolInitializer::new(n, t, g)?;
+    let mut initializer = ProtocolInitializer::new(total_parties, t, g)?;
     initializer.initialize_protocol()?;
 
     // Increment generation for Round 1
     g += 1;
-    n = n_array[g as usize];
-    t = t_array[g as usize];
+    let new_parties_current_gen = n_array[g as usize]; // Number of new parties in this generation
+    t = t_array[g as usize]; // Threshold for this generation
 
     // ======================================================================
     // Round 1 of Evolving DKG Protocol
@@ -39,12 +43,12 @@ fn main() -> Result<()> {
     let rng = StdRng::seed_from_u64(0x12345678);
     
     // Execute Round 1
-    let prev_generation_total = n_array[0]; // Total parties from generation 0 (5 parties)
+    let prev_generation_total = total_parties; // Total parties from previous generation
     let mut round1_executor = Round1Executor::new(
         participating_parties.clone(),
         initializer.pki.clone(),
         t,
-        n,
+        new_parties_current_gen, // n in Round1Executor is the number of new parties
         g,
         prev_generation_total,
         rng,
@@ -52,17 +56,21 @@ fn main() -> Result<()> {
     
     let evolving_messages = round1_executor.execute_round1()?;
 
+    // Update total parties after Round 1 (new parties are added)
+    total_parties += new_parties_current_gen;
+
     // ======================================================================
     // Round 2 of Evolving DKG Protocol
     // ======================================================================
     
     // Simulate network broadcast - collect received messages for each new party
-    let mut received_evolving_messages: Vec<Vec<_>> = vec![Vec::new(); n as usize];
+    // The size of received_evolving_messages should be based on the number of *new* parties
+    let mut received_evolving_messages: Vec<Vec<_>> = vec![Vec::new(); new_parties_current_gen as usize];
     
     for (_j, messages_from_j) in evolving_messages.iter().enumerate() {
-        for (k, message) in messages_from_j.iter().enumerate() {
-            // Broadcast σ̃_{j,k} to new party k
-            received_evolving_messages[k].push(message.clone());
+        for (k_relative, message) in messages_from_j.iter().enumerate() {
+            // Broadcast σ̃_{j,k} to new party k. k_relative is the index within the new parties.
+            received_evolving_messages[k_relative].push(message.clone());
         }
     }
     
@@ -70,8 +78,8 @@ fn main() -> Result<()> {
     let mut round2_executor = Round2Executor::new(
         round1_executor.new_parties,
         received_evolving_messages,
-        n,
-        n, // ng = n for this example
+        total_parties, // n in Round2Executor is the total number of parties
+        new_parties_current_gen, // ng in Round2Executor is the number of new parties
     );
     
     round2_executor.execute_round2()?;
@@ -93,7 +101,7 @@ fn main() -> Result<()> {
             println!("Original party {}: index={}, share={}", 
                      i, party.index, party.share.share);
             let share = shamir_rs::Share {
-                index: (i + 1) as u32, // Convert to 1-based indexing for Shamir
+                index: party.index as u32 + 1, // Use the actual party index
                 value: party.share.share.clone(),
             };
             original_shares.push(share);
@@ -113,7 +121,8 @@ fn main() -> Result<()> {
         // Reconstruct the secret using the new parties after Round 2  
         // Create a new scheme that matches the current generation's parameters
         let current_threshold = t_array[g as usize];
-        let current_n = n_array[g as usize];
+        // The current_n here refers to the number of *new* parties in this generation
+        let new_parties_in_current_gen = n_array[g as usize];
         println!("Attempting to reconstruct secret using {} new parties (current threshold: {})", 
                  round2_executor.get_final_shares().len(), current_threshold);
         
@@ -126,25 +135,32 @@ fn main() -> Result<()> {
         }
         
         // Create a new scheme for the current generation  
-        // The scheme needs to support the actual party indices (5, 6, 7), so we need n >= max_index
-        let max_party_index = round2_executor.new_parties.iter().map(|p| p.index).max().unwrap_or(current_n);
-        let scheme_n = std::cmp::max(current_n, max_party_index) as usize;
+        // The scheme needs to support the actual party indices (e.g., 5, 6, 7), so we need n >= max_index
+        let max_party_index = round2_executor.new_parties.iter().map(|p| p.index).max().unwrap_or(new_parties_in_current_gen);
+        // The scheme_n should be the total number of parties to cover all possible indices
+        let scheme_n = std::cmp::max(total_parties, max_party_index) as usize;
         let prime = BigUint::from_str("340282366920938463463374607431768211297")?;
         let current_scheme = shamir_rs::Scheme::new(current_threshold as usize, scheme_n, prime)?;
         println!("Created scheme with threshold={}, n={} to support party indices up to {}", 
                  current_threshold, scheme_n, max_party_index);
         
-        match round2_executor.reconstruct_secret_from_new_parties(&current_scheme, current_threshold as usize) {
+        let new_party_indices: Vec<u32> = round2_executor.new_parties.iter().map(|p| p.index).collect();
+        
+        match round2_executor.reconstruct_secret_from_new_parties(&current_scheme, current_threshold as usize, &new_party_indices) {
             Ok(reconstructed_secret) => {
-                println!("Reconstructed secret from new parties: {}", reconstructed_secret);
+                // Apply modular reduction to the reconstructed secret
+                let prime = BigUint::from_str("340282366920938463463374607431768211297")?;
+                let reconstructed_secret_reduced = &reconstructed_secret % &prime;
                 
-                if &reconstructed_secret == original_secret {
+                println!("Reconstructed secret from new parties: {} (reduced from {})", reconstructed_secret_reduced, reconstructed_secret);
+                
+                if &reconstructed_secret_reduced == original_secret {
                     println!("\n✅ SUCCESS: Reconstructed secret matches original secret!");
                     println!("The evolving DKG protocol correctly preserved the secret through the evolution process.");
                 } else {
                     println!("\n❌ FAILURE: Reconstructed secret does not match original secret!");
                     println!("Expected: {}", original_secret);
-                    println!("Got:      {}", reconstructed_secret);
+                    println!("Got:      {}", reconstructed_secret_reduced);
                 }
             }
             Err(e) => {
