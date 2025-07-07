@@ -55,7 +55,7 @@ setup.setupAll();
 "
 
 # 4. Encrypt message
-MSG=123
+MSG=117147506038849006004729114036497046814117147506038849006004729114036497046814
 echo -e "\n4. Encrypting message $MSG..."
 # Encode message as a BabyJubJub point
 ENCODED_MSG=$(node scripts/encode_message.js $MSG)
