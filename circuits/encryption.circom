@@ -1,10 +1,10 @@
 pragma circom 2.2.2;
 
-include "circomlib/circuits/babyjub.circom";
-include "circomlib/circuits/bitify.circom";
-include "circomlib/circuits/escalarmulany.circom";
-include "circomlib/circuits/escalarmulfix.circom";
-include "circomlib/circuits/comparators.circom";
+include "../circomlib/circuits/babyjub.circom";
+include "../circomlib/circuits/bitify.circom";
+include "../circomlib/circuits/escalarmulany.circom";
+include "../circomlib/circuits/escalarmulfix.circom";
+include "../circomlib/circuits/comparators.circom";
 
 template ElGamalEncrypt() {
     // message encoded as a point on the curve: message = [plaintext].G, G: curve base point
@@ -80,4 +80,3 @@ template ElGamalEncrypt() {
     encryptedMessage[1] <== addPoints.yout;
 }
 
-component main = ElGamalEncrypt(); 
