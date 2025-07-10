@@ -11,7 +11,7 @@ function randomInt(min, max) {
   return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
-(async () => {
+;(async () => {
   // 1) Parametri
   const n = randomInt(2, 9);
   const t = randomInt(2, 9);
@@ -27,12 +27,12 @@ function randomInt(min, max) {
   );
   console.log("xs:", xs);
 
-  // 4) Calcola Y = x[0]*G
+  // 4) Calcola Y = x[0]*Base8
   const babyJub = await circomlib.buildBabyjub();
   const F       = babyJub.F;
   const P0      = babyJub.mulPointEscalar(babyJub.Base8, xs[0]);
   const Y       = [F.toObject(P0[0]).toString(), F.toObject(P0[1]).toString()];
-  console.log("Y (x[0]*G):", Y);
+  console.log("Y (x[0]*Base8):", Y);
 
   // 5) Encode punti
   const points = [];
@@ -45,6 +45,7 @@ function randomInt(min, max) {
   for (let i = 0; i < n; i++) {
     keyPairs.push(await genBjjKeys());
   }
+  console.log("keyPairs.length:", keyPairs.length);
 
   // 7) Encrypt x[1..n]
   const cipher = [];
@@ -57,12 +58,13 @@ function randomInt(min, max) {
     });
     cipher.push({ ephemeralKey, encryptedMessage });
   }
+  console.log("cipher.length:", cipher.length);
 
-  // 8) Genera RL.circom unrolled
+  // 8) Genera RL.circom unrolled con ElGamalEncrypt(252)
   const CIRCUITS_DIR = path.resolve(__dirname, "..", "circuits");
   fs.mkdirSync(CIRCUITS_DIR, { recursive: true });
 
-  const BASE = [
+  const BASE8 = [
     "5299619240641551281634865583518297030282874472190772894086521144482721001553",
     "16950150798460657717958625567821834550301663161624707787222815936182638968203"
   ];
@@ -85,10 +87,10 @@ template RL() {
     signal input coeffs[${t + 1}];
     signal input x[${n + 1}];
 
-    // 1) Y = x[0]*G (252 bit)
+    // 1) Y = x[0]*Base8 (252 bit)
     component bits = Num2Bits(252);
     bits.in <== x[0];
-    component mulG = EscalarMulFix(252, [${BASE[0]}, ${BASE[1]}]);
+    component mulG = EscalarMulFix(252, [${BASE8[0]}, ${BASE8[1]}]);
 `;
   for (let i = 0; i < 252; i++) {
     code += `    mulG.e[${i}] <== bits.out[${i}];\n`;
@@ -107,7 +109,7 @@ template RL() {
   }
   code += `    // 3) ElGamalEncrypt su msg/cipher\n`;
   for (let i = 0; i < n; i++) {
-    code += `    component enc${i} = ElGamalEncrypt();\n`;
+    code += `    component enc${i} = ElGamalEncrypt(252);\n`;
     code += `    enc${i}.message[0]       <== msg[${i}][0];\n`;
     code += `    enc${i}.message[1]       <== msg[${i}][1];\n`;
     code += `    enc${i}.nonceKey         <== sk[${i}];\n`;
@@ -120,8 +122,9 @@ template RL() {
   }
   code += `}\ncomponent main = RL();\n`;
 
-  fs.writeFileSync(path.join(CIRCUITS_DIR, "RL.circom"), code);
-  console.log("✔ Generato:", path.join(CIRCUITS_DIR, "RL.circom"));
+  const CIRCUIT_PATH = path.join(CIRCUITS_DIR, "RL.circom");
+  fs.writeFileSync(CIRCUIT_PATH, code);
+  console.log("✔ Generato:", CIRCUIT_PATH);
 
   // 9) Pulisci build/ (mantieni solo .ptau)
   const BUILD_DIR = path.resolve(__dirname, "..", "build");
@@ -139,6 +142,8 @@ template RL() {
     coeffs,
     x:      xs,
   };
+
+  console.log("→ input.pk.length:", input.pk.length, "expected:", n);
   fs.writeFileSync(path.join(BUILD_DIR, "input.json"), JSON.stringify(input, null, 2));
   console.log("✔ Scritti:", path.join(BUILD_DIR, "input.json"));
 
