@@ -8,13 +8,13 @@ include "../circomlib/circuits/comparators.circom";
 include "encryption.circom";
 
 template RL() {
-    signal input pk[4][2];
+    signal input pk[2][2];
     signal input Y[2];
-    signal input msg[4][2];
-    signal input cipher[4][2][2];
-    signal input sk[4];
-    signal input coeffs[4];
-    signal input x[5];
+    signal input msg[2][2];
+    signal input cipher[2][2][2];
+    signal input sk[2];
+    signal input coeffs[9];
+    signal input x[3];
 
     // 1) Y = x[0]*Base8 (252 bit)
     component bits = Num2Bits(252);
@@ -280,31 +280,34 @@ template RL() {
       acc += coeffs[1] * 0;
       acc += coeffs[2] * 0;
       acc += coeffs[3] * 0;
+      acc += coeffs[4] * 0;
+      acc += coeffs[5] * 0;
+      acc += coeffs[6] * 0;
+      acc += coeffs[7] * 0;
+      acc += coeffs[8] * 0;
       x[0] === acc;
     }
     { var acc = coeffs[0];
       acc += coeffs[1] * 1;
       acc += coeffs[2] * 1;
       acc += coeffs[3] * 1;
+      acc += coeffs[4] * 1;
+      acc += coeffs[5] * 1;
+      acc += coeffs[6] * 1;
+      acc += coeffs[7] * 1;
+      acc += coeffs[8] * 1;
       x[1] === acc;
     }
     { var acc = coeffs[0];
       acc += coeffs[1] * 2;
       acc += coeffs[2] * 4;
       acc += coeffs[3] * 8;
+      acc += coeffs[4] * 16;
+      acc += coeffs[5] * 32;
+      acc += coeffs[6] * 64;
+      acc += coeffs[7] * 128;
+      acc += coeffs[8] * 256;
       x[2] === acc;
-    }
-    { var acc = coeffs[0];
-      acc += coeffs[1] * 3;
-      acc += coeffs[2] * 9;
-      acc += coeffs[3] * 27;
-      x[3] === acc;
-    }
-    { var acc = coeffs[0];
-      acc += coeffs[1] * 4;
-      acc += coeffs[2] * 16;
-      acc += coeffs[3] * 64;
-      x[4] === acc;
     }
     // 3) ElGamalEncrypt su msg/cipher
     component enc0 = ElGamalEncrypt(252);
@@ -328,28 +331,6 @@ template RL() {
     enc1.ephemeralKey[1]  === cipher[1][0][1];
     enc1.encryptedMessage[0] === cipher[1][1][0];
     enc1.encryptedMessage[1] === cipher[1][1][1];
-
-    component enc2 = ElGamalEncrypt(252);
-    enc2.message[0]       <== msg[2][0];
-    enc2.message[1]       <== msg[2][1];
-    enc2.nonceKey         <== sk[2];
-    enc2.publicKey[0]     <== pk[2][0];
-    enc2.publicKey[1]     <== pk[2][1];
-    enc2.ephemeralKey[0]  === cipher[2][0][0];
-    enc2.ephemeralKey[1]  === cipher[2][0][1];
-    enc2.encryptedMessage[0] === cipher[2][1][0];
-    enc2.encryptedMessage[1] === cipher[2][1][1];
-
-    component enc3 = ElGamalEncrypt(252);
-    enc3.message[0]       <== msg[3][0];
-    enc3.message[1]       <== msg[3][1];
-    enc3.nonceKey         <== sk[3];
-    enc3.publicKey[0]     <== pk[3][0];
-    enc3.publicKey[1]     <== pk[3][1];
-    enc3.ephemeralKey[0]  === cipher[3][0][0];
-    enc3.ephemeralKey[1]  === cipher[3][0][1];
-    enc3.encryptedMessage[0] === cipher[3][1][0];
-    enc3.encryptedMessage[1] === cipher[3][1][1];
 
 }
 component main = RL();
