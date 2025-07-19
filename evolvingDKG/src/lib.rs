@@ -1,17 +1,9 @@
-use anyhow::Result;
-//use dusk_jubjub::{JubJubAffine, JubJubExtended, JubJubScalar, GENERATOR_EXTENDED};
-use ff::Field;
-use group::GroupEncoding;
-use num_bigint::BigUint;
-use serde::{Deserialize, Serialize};
-use serde_json;
 use std::{fmt, fs, hash::Hash, path::Path, process::Command, str::FromStr};
+use num_bigint::BigUint;
+use serde::{Serialize, Deserialize};
+use anyhow::Result;
 
-pub mod circom_decryption;
-pub mod circom_encryption;
 pub mod elgamal;
-pub mod schnorr_lib;
-pub mod setup_zk;
 use elgamal::ElGamalCiphertext;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Hash)]
@@ -23,14 +15,6 @@ pub struct BabyJubJubPK {
 #[derive(Debug, Clone)]
 pub struct BabyJubJubSK {
     pub value: BigUint,
-}
-
-impl BabyJubJubSK {
-    pub fn get_public_key(&self) -> BabyJubJubPK {
-        let jubjub_sk = biguint_to_scalar(&self.value).expect("Invalid scalar value");
-        let jubjub_pk = GENERATOR_EXTENDED * &jubjub_sk;
-        jubjub_pk.into()
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -153,6 +137,7 @@ impl fmt::Display for PKI {
     }
 }
 
+
 pub fn key_gen(i: u32) -> Result<()> {
     // Get the parent directory path
     let parent_dir = Path::new("..");
@@ -194,18 +179,4 @@ pub fn read_keys(i: u32) -> (BabyJubJubSK, BabyJubJubPK) {
     };
 
     (sk, pk)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use ff::Field;
-    use rand::rngs::StdRng;
-    use rand::SeedableRng;
-
-    #[test]
-    fn test_pki_initialization() {
-        let pki = PKI::new();
-        assert_eq!(pki.keys.len(), 0);
-    }
 }
