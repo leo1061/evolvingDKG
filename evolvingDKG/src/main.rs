@@ -4,8 +4,8 @@ use shamir_rs::Scheme;
 // use evolvingDKG::{key_gen, read_keys, Party, PartyList, PKI, BabyJubJubPK, BabyJubJubSK, setup_zk::CircuitSetup, circom_encryption::EncryptionCircuit, elgamal::{self, ElGamalCiphertext}};
 use evolvingDKG::{key_gen, read_keys, SigmaTilde, Party, PKI, elgamal::ElGamalCiphertext};
 use ark_ed_on_bn254::{EdwardsProjective, Fr, Fq};
-use ark_ec::PrimeGroup;
-use ark_ff::{PrimeField, UniformRand, BigInteger};
+use ark_ec::{PrimeGroup, CurveGroup};
+use ark_ff::{PrimeField, UniformRand, BigInteger, One, Zero};
 use std::str::FromStr;
 use rand::{rngs::StdRng, SeedableRng, Rng};
 // use serde_json::Value;
@@ -255,7 +255,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     debug_print(debug, &format!("{:?}", parties));
-    println!("================Round 1=================");
+
+    // Create an aggregated private key as a sum of the final_shares components
+    let mut aggregated_private_key = BigUint::from(0u32);
+    for share in &final_shares {
+        aggregated_private_key = (aggregated_private_key + share) % &prime;
+    }
+    println!("\nAggregated private key: {}", aggregated_private_key);
+    
+    // From that aggregated private key compute an aggregated public key which basically is a point on the baby jubjub curve
+    let aggregated_private_key_fr = Fr::from_str(&aggregated_private_key.to_string()).unwrap();
+    let aggregated_public_key = EdwardsProjective::generator() * aggregated_private_key_fr;
+    let aggregated_public_key_affine = aggregated_public_key.into_affine();
+    
+    println!("Aggregated public key: ({}, {})", 
+             aggregated_public_key_affine.x, 
+             aggregated_public_key_affine.y);
+    
+    
+    
+    println!("\n================Round 1=================");
 
     // Update generation and party counts for Round 1
     g = 1;
@@ -366,7 +385,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 "✓ ElGamal round-trip successful for old_party={}, new_party={}, share_idx={}", i, j_idx, idx
                             ));
                             
-                            // Push the encrypted version as requested in FIX comment
                             encrypted_shares_for_others.push((idx, encrypted_share));
                         } else {
                             debug_print(debug, &format!(
