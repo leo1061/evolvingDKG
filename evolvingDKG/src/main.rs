@@ -2,7 +2,7 @@
 use num_bigint::BigUint;
 use shamir_rs::Scheme;
 // use evolvingDKG::{key_gen, read_keys, Party, PartyList, PKI, BabyJubJubPK, BabyJubJubSK, setup_zk::CircuitSetup, circom_encryption::EncryptionCircuit, elgamal::{self, ElGamalCiphertext}};
-use evolvingDKG::{key_gen, read_keys, SigmaTilde, Party, PKI};
+use evolvingDKG::{key_gen, read_keys, SigmaTilde, Party, PKI, elgamal::ElGamalCiphertext};
 use ark_ed_on_bn254::{EdwardsProjective, Fr, Fq};
 use ark_ec::PrimeGroup;
 use ark_ff::{PrimeField, UniformRand, BigInteger};
@@ -19,7 +19,7 @@ fn debug_print(debug: bool, message: &str) {
     }
 }
 
-const MAX_ATTEMPTS: usize = 10_000;
+const MAX_ATTEMPTS: usize = 20_000; //need to have percentage based number
 
 /// Generate a random field element that is compatible with Elligator2
 /// This function tries random field elements until it finds one that can be encoded/decoded
@@ -268,8 +268,36 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Round 1 parameters: old_n={}, old_t={}, new ng={}, total n={}, new t={}", 
              old_n, old_t, ng, n, t);
     
-    // Decide which parties of old t are online (for demo, assume all old parties are online)
-    let online_old_parties: Vec<usize> = (0..old_n as usize).collect();
+    // Generate keys for new parties (indices old_n to n-1) and add to PKI
+    println!("\n--- Generating keys for new parties ---");
+    let mut new_parties: Vec<Party> = Vec::new();
+    
+    // Generate keys in parallel for new parties
+    let new_party_tasks: Vec<usize> = (old_n..n).map(|i| i as usize).collect();
+    let new_party_results: Result<Vec<Party>> = new_party_tasks
+        .par_iter()
+        .map(|&i| -> Result<Party> {
+            println!("Generating keys for new party {}", i);
+            let party_id = i as u32;
+            key_gen(party_id)?;
+            let (sk, pk) = read_keys(party_id);
+            let party = Party::new(party_id, g, sk, pk)?;
+            Ok(party)
+        })
+        .collect();
+    
+    new_parties = new_party_results?;
+    
+    // Add new parties' public keys to PKI
+    for party in &new_parties {
+        pki.add_public_key(party.share.pk.clone());
+    }
+    
+    println!("Added {} new parties to PKI", new_parties.len());
+    println!("PKI now contains {} total keys", pki.keys.len());
+
+    // Select exactly `old_t` parties to be online (instead of all old parties)
+    let online_old_parties: Vec<usize> = (0..old_t as usize).collect();
     println!("Online old parties: {:?}", online_old_parties);
     
     
@@ -303,68 +331,66 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         for j in old_n..n {
             let j_idx = j as usize;
             
-            // Collect all shares except the one for party j
-            let mut shares_for_others = Vec::new();
+            // Get party j's public key from PKI for encryption
+            let new_party = &new_parties[j_idx - old_n as usize]; // j_idx is in range [old_n, n)
+            let elgamal_sk_bigint = &new_party.share.sk.value;
+            let elgamal_sk = Fr::from_str(&elgamal_sk_bigint.to_string()).unwrap();
+            let elgamal_pk = EdwardsProjective::generator() * elgamal_sk;
+            
+            // Collect all shares, encrypting them with party j's public key
+            let mut encrypted_shares_for_others = Vec::new();
+
             for (idx, share) in shares.iter().enumerate() {
-                if idx != j_idx {
-                    shares_for_others.push((idx, share.value.clone()));
+                if idx != j_idx {  // Don't include the share for party j itself
+                    // Convert share to Fr for ElGamal encryption
+                    let share_as_fr = Fr::from_str(&share.value.to_string()).unwrap();
+                    
+                    // Check if this share is Elligator2-compatible
+                    let is_compatible = is_elligator2_compatible(&share.value);
+                    debug_print(debug, &format!(
+                        "Share idx={} for new_party={} is Elligator2-compatible: {}", 
+                        idx, j_idx, is_compatible
+                    ));
+                    
+                    // Encrypt the share using party j's public key
+                    let mut rng = StdRng::seed_from_u64(0x12345678 + (i * 1000 + j_idx * 100 + idx) as u64);
+                    
+                    if let Ok(encrypted_share) = evolvingDKG::elgamal::ElGamal::encrypt_scalar(&elgamal_pk, &share_as_fr, &mut rng) {
+                        // Test round-trip to verify encryption works
+                        if let Some(decrypted_share) = evolvingDKG::elgamal::ElGamal::decrypt_to_scalar(&encrypted_share, &elgamal_sk) {
+                            // Assert equality for round-trip verification
+                            assert_eq!(share_as_fr, decrypted_share, 
+                                "ElGamal round-trip failed for old_party={}, new_party={}, share_idx={}", i, j_idx, idx);
+                            
+                            debug_print(debug, &format!(
+                                "✓ ElGamal round-trip successful for old_party={}, new_party={}, share_idx={}", i, j_idx, idx
+                            ));
+                            
+                            // Push the encrypted version as requested in FIX comment
+                            encrypted_shares_for_others.push((idx, encrypted_share));
+                        } else {
+                            debug_print(debug, &format!(
+                                "⚠ ElGamal decryption failed for old_party={}, new_party={}, share_idx={} (Elligator2 limitation)", i, j_idx, idx
+                            ));
+                        }
+                    } else {
+                        debug_print(debug, &format!(
+                            "⚠ ElGamal encryption failed for old_party={}, new_party={}, share_idx={} (Elligator2 limitation)", i, j_idx, idx
+                        ));
+                    }
                 }
             }
             
-            // Get the share value before creating sigma_tilde
-            let share_for_recipient = shares[j_idx].value.clone();
-            
-            // Create sigma_tilde
+            // Create sigma_tilde with encrypted shares
             let sigma_tilde = SigmaTilde {
                 old_party_index: i,
                 new_party_index: j_idx,
                 commitment: commitment.clone(),
-                shares_for_others,
-                share_for_recipient: share_for_recipient.clone(),
+                encrypted_shares: encrypted_shares_for_others
             };
             
             // Add to all_sigma_tilde
             all_sigma_tilde.push(sigma_tilde);
-            
-            // TODO:create a roundtrip encryption decryption using el gamal and assert equality
-            
-            // Create ElGamal keypair for testing
-            let mut test_rng = StdRng::seed_from_u64(0x12345678 + (i * 1000 + j_idx) as u64);
-            let (elgamal_sk, elgamal_pk) = evolvingDKG::elgamal::ElGamal::generate_keypair(&mut test_rng);
-            
-            // Convert the share to Fr for ElGamal encryption
-            let share_as_fr = Fr::from_str(&share_for_recipient.to_string()).unwrap();
-            
-            // Check if this share is Elligator2-compatible
-            let is_compatible = is_elligator2_compatible(&share_for_recipient);
-            debug_print(debug, &format!(
-                "Share for old_party={}, new_party={} is Elligator2-compatible: {}", 
-                i, j_idx, is_compatible
-            ));
-            
-            // Encrypt the share using ElGamal scalar encryption (with Elligator2)
-            let encrypted_share = evolvingDKG::elgamal::ElGamal::encrypt_scalar(&elgamal_pk, &share_as_fr, &mut test_rng);
-            
-            if let Ok(ciphertext) = encrypted_share {
-                // Decrypt the share back
-                if let Some(decrypted_share) = evolvingDKG::elgamal::ElGamal::decrypt_to_scalar(&ciphertext, &elgamal_sk) {
-                    // Assert equality - the decrypted share should equal the original
-                    assert_eq!(share_as_fr, decrypted_share, 
-                        "ElGamal round-trip failed for old_party={}, new_party={}", i, j_idx);
-                    
-                    debug_print(debug, &format!(
-                        "✓ ElGamal round-trip successful for old_party={}, new_party={}", i, j_idx
-                    ));
-                } else {
-                    debug_print(debug, &format!(
-                        "⚠ ElGamal decryption failed for old_party={}, new_party={} (Elligator2 limitation)", i, j_idx
-                    ));
-                }
-            } else {
-                debug_print(debug, &format!(
-                    "⚠ ElGamal encryption failed for old_party={}, new_party={} (Elligator2 limitation)", i, j_idx
-                ));
-            }
 
         }
     }
@@ -373,8 +399,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     debug_print(debug, &format!("all_sigma_tilde length: {}", all_sigma_tilde.len()));
     for sigma in &all_sigma_tilde {
         debug_print(debug, &format!(
-            "SigmaTilde: old_party={}, new_party={}, share_for_recipient={}", 
-            sigma.old_party_index, sigma.new_party_index, sigma.share_for_recipient
+            "SigmaTilde: old_party={}, new_party={}, encrypted_shares_count={}", 
+            sigma.old_party_index, sigma.new_party_index, sigma.encrypted_shares.len()
         ));
     }
     

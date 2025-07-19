@@ -35,8 +35,7 @@ pub struct SigmaTilde {
     pub old_party_index: usize,
     pub new_party_index: usize,
     pub commitment: EdwardsProjective,
-    pub shares_for_others: Vec<(usize, BigUint)>, // (party_index, share_value)
-    pub share_for_recipient: BigUint,
+    pub encrypted_shares: Vec<(usize, ElGamalCiphertext)>, // (party_index, share_value)
 }
 
 impl Share {
