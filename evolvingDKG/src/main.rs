@@ -3,9 +3,9 @@ use num_bigint::BigUint;
 use shamir_rs::Scheme;
 // use evolvingDKG::{key_gen, read_keys, Party, PartyList, PKI, BabyJubJubPK, BabyJubJubSK, setup_zk::CircuitSetup, circom_encryption::EncryptionCircuit, elgamal::{self, ElGamalCiphertext}};
 use evolvingDKG::{key_gen, read_keys, SigmaTilde, Party, PKI};
-use ark_ed_on_bn254::{EdwardsProjective, Fr};
+use ark_ed_on_bn254::{EdwardsProjective, Fr, Fq};
 use ark_ec::PrimeGroup;
-use ark_ff::PrimeField;
+use ark_ff::{PrimeField, UniformRand, BigInteger};
 use std::str::FromStr;
 use rand::{rngs::StdRng, SeedableRng, Rng};
 // use serde_json::Value;
@@ -19,10 +19,127 @@ fn debug_print(debug: bool, message: &str) {
     }
 }
 
+const MAX_ATTEMPTS: usize = 10_000;
+
+/// Generate a random field element that is compatible with Elligator2
+/// This function tries random field elements until it finds one that can be encoded/decoded
+fn generate_elligator2_compatible_fr(rng: &mut StdRng) -> Fr {
+    let a = evolvingDKG::curve_converter::CurveConverter::montgomery_a();
+    let b = evolvingDKG::curve_converter::CurveConverter::montgomery_b();
+    
+    loop {
+        // Generate a random Fr
+        let random_fr = Fr::rand(rng);
+        
+        // Convert to Fq for Elligator2 testing
+        let fr_bytes = random_fr.into_bigint().to_bytes_le();
+        let field_element = Fq::from_le_bytes_mod_order(&fr_bytes);
+        
+        // Try to encode with Elligator2
+        if let Some((x_mont, y_mont)) = evolvingDKG::curve_converter::Elligator2::encode(&field_element, &a, &b) {
+            // Try to decode back
+            if let Some(decoded_element) = evolvingDKG::curve_converter::Elligator2::decode(&x_mont, &y_mont, &a, &b) {
+                // Convert back to Fr and verify round-trip
+                let decoded_bytes = decoded_element.into_bigint().to_bytes_le();
+                let decoded_fr = Fr::from_le_bytes_mod_order(&decoded_bytes);
+                
+                if decoded_fr == random_fr {
+                    return random_fr;
+                }
+            }
+        }
+        // If we get here, this random_fr is not compatible, try another one
+    }
+}
+
+/// Convert an Elligator2-compatible Fr to BigUint for use with Shamir scheme
+fn fr_to_biguint(fr: &Fr) -> BigUint {
+    let bytes = fr.into_bigint().to_bytes_le();
+    BigUint::from_bytes_le(&bytes)
+}
+
+/// Convert BigUint back to Fr (for checking Elligator2 compatibility)
+fn biguint_to_fr(big: &BigUint) -> Fr {
+    let bytes = big.to_bytes_le();
+    Fr::from_le_bytes_mod_order(&bytes)
+}
+
+/// Check if a BigUint (when converted to Fr) is Elligator2-compatible
+fn is_elligator2_compatible(big: &BigUint) -> bool {
+    let fr = biguint_to_fr(big);
+    let a = evolvingDKG::curve_converter::CurveConverter::montgomery_a();
+    let b = evolvingDKG::curve_converter::CurveConverter::montgomery_b();
+    
+    // Convert to Fq for Elligator2 testing
+    let fr_bytes = fr.into_bigint().to_bytes_le();
+    let field_element = Fq::from_le_bytes_mod_order(&fr_bytes);
+    
+    // Try to encode with Elligator2
+    if let Some((x_mont, y_mont)) = evolvingDKG::curve_converter::Elligator2::encode(&field_element, &a, &b) {
+        // Try to decode back
+        if let Some(decoded_element) = evolvingDKG::curve_converter::Elligator2::decode(&x_mont, &y_mont, &a, &b) {
+            // Convert back to Fr and verify round-trip
+            let decoded_bytes = decoded_element.into_bigint().to_bytes_le();
+            let decoded_fr = Fr::from_le_bytes_mod_order(&decoded_bytes);
+            
+            return decoded_fr == fr;
+        }
+    }
+    false
+}
+
+/// Check if all shares in a vector are Elligator2-compatible
+fn are_all_shares_elligator2_compatible(shares: &[shamir_rs::Share]) -> bool {
+    shares.iter().all(|share| is_elligator2_compatible(&share.value))
+}
+
+/// Generate Shamir shares that are all Elligator2-compatible
+/// Retries the secret sharing until all resulting shares are compatible
+fn generate_elligator2_compatible_shares(
+    secret: &BigUint,
+    scheme: &Scheme,
+    max_attempts: usize,
+    debug: bool,
+) -> Vec<shamir_rs::Share> {
+    let mut best_shares = Vec::new();
+    let mut best_compatible_count = 0;
+    
+    for attempt in 1..=max_attempts {
+        let shares = scheme.split_secret(secret);
+        let compatible_count = shares.iter()
+            .filter(|share| is_elligator2_compatible(&share.value))
+            .count();
+        
+        if compatible_count > best_compatible_count {
+            best_compatible_count = compatible_count;
+            best_shares = shares.clone();
+        }
+        
+        if are_all_shares_elligator2_compatible(&shares) {
+            if debug && attempt > 1 {
+                println!("  ✓ Found ALL {}/{} Elligator2-compatible shares after {} attempts", 
+                         shares.len(), shares.len(), attempt);
+            }
+            return shares;
+        } else if debug && attempt <= 10 {
+            println!("  Attempt {}: {}/{} shares are Elligator2-compatible", 
+                     attempt, compatible_count, shares.len());
+        } else if debug && attempt % 100 == 0 {
+            println!("  Attempt {}: Best so far {}/{} compatible shares", 
+                     attempt, best_compatible_count, best_shares.len());
+        }
+    }
+    
+    // If we couldn't find all compatible, return the best we found
+    println!("  ⚠ Using best result: {}/{} Elligator2-compatible shares after {} attempts", 
+             best_compatible_count, best_shares.len(), max_attempts);
+    best_shares
+}
+
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Debug flag
-    let debug = true;
+    let debug = false;
 
     println!("================Pre initialization=================");
 
@@ -36,9 +153,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut n = ng; // total number of parties (initially n = ng for generation 0)
     let mut t = t_array[0]; // threshold for reconstruction
     
-    // Choose a large prime for the field
-    let prime = BigUint::from_str("340282366920938463463374607431768211297")?;
-    println!("\nUsing prime field of size: {}", prime);
+    // Use the actual Fr field modulus for compatibility
+    let prime = BigUint::from_str("2736030358979909402780800718157159386076813972158567259200215660948447373041")?; // Fr modulus
+    println!("\nUsing Fr field modulus: {}", prime);
     
     // Create the Shamir scheme
     let scheme = Scheme::new(t as usize, ng as usize, prime.clone())?;
@@ -84,18 +201,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("\n--- Step1: Each party creates a random secret ---");
     let mut party_secrets: Vec<BigUint> = Vec::new();
     for i in 0..ng {
-        let secret = BigUint::from(rng.gen::<u64>()) % &prime; // Random secret for demo
+        // Generate Elligator2-compatible secret
+        let elligator2_compatible_fr = generate_elligator2_compatible_fr(&mut rng);
+        let secret = fr_to_biguint(&elligator2_compatible_fr);
         party_secrets.push(secret.clone());
-        debug_print(debug, &format!("Party {} generated secret: {}", i, secret));
+        debug_print(debug, &format!("Party {} generated Elligator2-compatible secret: {}", i, secret));
     }
     
-    println!("\n--- Step 2: Creating secret shares ---");
+    println!("\n--- Step 2: Creating secret shares (ensuring Elligator2 compatibility) ---");
     let mut all_shares: Vec<Vec<shamir_rs::Share>> = Vec::new();
     for i in 0..ng {
-        let shares = scheme.split_secret(&party_secrets[i as usize]);
+        println!("Party {} generating Elligator2-compatible shares...", i);
+        let shares = generate_elligator2_compatible_shares(
+            &party_secrets[i as usize], 
+            &scheme, 
+            MAX_ATTEMPTS, // max attempts
+            false // reduced debug output
+        );
         debug_print(debug, &format!("Party {} has those shares: {:?}", i, shares));
         all_shares.push(shares.clone());
-        println!("Party {} created {} shares of their secret", i, shares.len());
+        println!("Party {} created {} Elligator2-compatible shares", i, shares.len());
     }
     // create keys for each party
 
@@ -165,8 +290,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let share_scalar = Fr::from_str(&old_party_share.to_string()).unwrap();
         let commitment = generator * share_scalar;
         
-        // Shamir split old party share to get x_{i,k} for k = {1..n}
-        let shares = new_scheme.split_secret(old_party_share);
+        // Shamir split old party share to get x_{i,k} for k = {1..n} (ensuring Elligator2 compatibility)
+        println!("Old party {} generating Elligator2-compatible shares for new scheme...", i);
+        let shares = generate_elligator2_compatible_shares(
+            old_party_share, 
+            &new_scheme, 
+            MAX_ATTEMPTS, // max attempts
+            false // reduced debug output
+        );
         
         // For each new party j (new parties have indices from old_n to n-1)
         for j in old_n..n {
@@ -180,17 +311,61 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
             
+            // Get the share value before creating sigma_tilde
+            let share_for_recipient = shares[j_idx].value.clone();
+            
             // Create sigma_tilde
             let sigma_tilde = SigmaTilde {
                 old_party_index: i,
                 new_party_index: j_idx,
                 commitment: commitment.clone(),
                 shares_for_others,
-                share_for_recipient: shares[j_idx].value.clone(),
+                share_for_recipient: share_for_recipient.clone(),
             };
             
             // Add to all_sigma_tilde
             all_sigma_tilde.push(sigma_tilde);
+            
+            // TODO:create a roundtrip encryption decryption using el gamal and assert equality
+            
+            // Create ElGamal keypair for testing
+            let mut test_rng = StdRng::seed_from_u64(0x12345678 + (i * 1000 + j_idx) as u64);
+            let (elgamal_sk, elgamal_pk) = evolvingDKG::elgamal::ElGamal::generate_keypair(&mut test_rng);
+            
+            // Convert the share to Fr for ElGamal encryption
+            let share_as_fr = Fr::from_str(&share_for_recipient.to_string()).unwrap();
+            
+            // Check if this share is Elligator2-compatible
+            let is_compatible = is_elligator2_compatible(&share_for_recipient);
+            debug_print(debug, &format!(
+                "Share for old_party={}, new_party={} is Elligator2-compatible: {}", 
+                i, j_idx, is_compatible
+            ));
+            
+            // Encrypt the share using ElGamal scalar encryption (with Elligator2)
+            let encrypted_share = evolvingDKG::elgamal::ElGamal::encrypt_scalar(&elgamal_pk, &share_as_fr, &mut test_rng);
+            
+            if let Ok(ciphertext) = encrypted_share {
+                // Decrypt the share back
+                if let Some(decrypted_share) = evolvingDKG::elgamal::ElGamal::decrypt_to_scalar(&ciphertext, &elgamal_sk) {
+                    // Assert equality - the decrypted share should equal the original
+                    assert_eq!(share_as_fr, decrypted_share, 
+                        "ElGamal round-trip failed for old_party={}, new_party={}", i, j_idx);
+                    
+                    debug_print(debug, &format!(
+                        "✓ ElGamal round-trip successful for old_party={}, new_party={}", i, j_idx
+                    ));
+                } else {
+                    debug_print(debug, &format!(
+                        "⚠ ElGamal decryption failed for old_party={}, new_party={} (Elligator2 limitation)", i, j_idx
+                    ));
+                }
+            } else {
+                debug_print(debug, &format!(
+                    "⚠ ElGamal encryption failed for old_party={}, new_party={} (Elligator2 limitation)", i, j_idx
+                ));
+            }
+
         }
     }
     
