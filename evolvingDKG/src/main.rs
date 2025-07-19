@@ -1,7 +1,7 @@
 // use anyhow::Result;
 use num_bigint::BigUint;
-use shamir_rs::{Scheme, ;
-use shamir_rs::Share as SsShare;
+use shamir_rs::{Scheme};
+use crate::polynomial::{Polynomial, Point};
 // use evolvingDKG::{key_gen, read_keys, Party, PartyList, PKI, BabyJubJubPK, BabyJubJubSK, setup_zk::CircuitSetup, circom_encryption::EncryptionCircuit, elgamal::{self, ElGamalCiphertext}};
 use evolvingDKG::{key_gen, read_keys, SigmaTilde, Party, PKI, elgamal::ElGamalCiphertext};
 use ark_ed_on_bn254::{EdwardsProjective, Fr, Fq};
@@ -490,6 +490,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     all_final_shares.extend(new_party_final_shares.clone());
     
     // Calculate the new aggregated private key
+
     let mut new_aggregated_private_key = BigUint::from(0u32);
     for share in &all_final_shares {
         new_aggregated_private_key = (new_aggregated_private_key + share) % &prime;
