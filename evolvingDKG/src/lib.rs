@@ -4,7 +4,10 @@ use num_bigint::BigUint;
 use serde::{Serialize, Deserialize};
 use anyhow::Result;
 
+// pub mod elgamal_wrong;
 pub mod elgamal;
+pub mod elligator;
+pub mod curve_converter;
 use elgamal::ElGamalCiphertext;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Hash)]

@@ -1,163 +1,234 @@
+use ark_ec::{AffineRepr, PrimeGroup};
+use ark_ed_on_bn254::{EdwardsAffine, EdwardsConfig, EdwardsProjective, Fr};
+use ark_ff::UniformRand;
+use ark_std::rand::{CryptoRng, RngCore};
+use ark_std::Zero;
+use std::str::FromStr;
 use anyhow::Result;
-use jubjub_elgamal::{Encryption, DecryptFrom};
-use dusk_jubjub::{JubJubScalar, JubJubExtended, GENERATOR_EXTENDED};
-use ff::Field;
-use rand::rngs::StdRng;
-use rand::SeedableRng;
 
-/// Represents an ElGamal ciphertext using JubJub curve
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ElGamalCiphertext {
-    pub c1: JubJubExtended,  // rG
-    pub c2: JubJubExtended,  // m + rPK
+    pub c1: EdwardsProjective,
+    pub c2: EdwardsProjective,
 }
 
 impl ElGamalCiphertext {
-    /// Create a new ElGamal ciphertext
-    pub fn new(c1: JubJubExtended, c2: JubJubExtended) -> Self {
+    pub fn new(c1: EdwardsProjective, c2: EdwardsProjective) -> Self {
         Self { c1, c2 }
     }
 
-    /// Decrypt the ciphertext using a secret key
-    pub fn decrypt(&self, sk: &JubJubScalar) -> JubJubExtended {
-        // c2 - sk * c1 = m + rPK - sk * rG = m + rPK - rPK = m
-        self.c2 - (self.c1 * sk)
+    pub fn decrypt(&self, sk: &Fr) -> EdwardsProjective {
+        self.c2 - self.c1 * sk
     }
 }
 
-/// Encrypt a message using ElGamal with JubJub curve
-pub fn encrypt(
-    public_key: &JubJubExtended,
-    message: &JubJubExtended,
-    rng: &mut StdRng,
-) -> Result<ElGamalCiphertext> {
-    // Generate a random scalar for the encryption
-    let r = JubJubScalar::random(rng);
-    
-    // Compute c1 = rG
-    let c1 = GENERATOR_EXTENDED * &r;
-    
-    // Compute c2 = m + rPK
-    let c2 = message + (public_key * &r);
-    
-    Ok(ElGamalCiphertext::new(c1, c2))
+pub struct ElGamal;
+
+impl ElGamal {
+    pub fn generate_keypair<R: RngCore + CryptoRng>(rng: &mut R) -> (Fr, EdwardsProjective) {
+        let sk = Fr::rand(rng);
+        let pk = EdwardsProjective::generator() * sk;
+        (sk, pk)
+    }
+
+    pub fn encrypt<R: RngCore + CryptoRng>(
+        public_key: &EdwardsProjective,
+        message: &EdwardsProjective,
+        rng: &mut R,
+    ) -> Result<ElGamalCiphertext> {
+        let r = Fr::rand(rng);
+        
+        let c1 = EdwardsProjective::generator() * r;
+        let c2 = *message + *public_key * r;
+        
+        Ok(ElGamalCiphertext::new(c1, c2))
+    }
+
+    // FIX: must use the mapping elligator2
+    pub fn encrypt_scalar<R: RngCore + CryptoRng>(
+        public_key: &EdwardsProjective,
+        message: &Fr,
+        rng: &mut R,
+    ) -> Result<ElGamalCiphertext> {
+        let message_point = EdwardsProjective::generator() * message;
+        Self::encrypt(public_key, &message_point, rng)
+    }
+
+    // FIX: must use the mapping elligator2
+    pub fn decrypt_to_scalar(ciphertext: &ElGamalCiphertext, sk: &Fr) -> Option<Fr> {
+        let decrypted_point = ciphertext.decrypt(sk);
+        Self::discrete_log(&decrypted_point, 32)
+    }
+
+    // FIX: remove
+    fn discrete_log(point: &EdwardsProjective, max_bits: u32) -> Option<Fr> {
+        let generator = EdwardsProjective::generator();
+        let max_value = 1u64 << max_bits;
+        
+        let mut current = EdwardsProjective::zero();
+        for i in 0..max_value {
+            if current == *point {
+                return Some(Fr::from(i));
+            }
+            current += generator;
+        }
+        
+        None
+    }
+
+    pub fn homomorphic_add(
+        ct1: &ElGamalCiphertext,
+        ct2: &ElGamalCiphertext,
+    ) -> ElGamalCiphertext {
+        ElGamalCiphertext::new(ct1.c1 + ct2.c1, ct1.c2 + ct2.c2)
+    }
+
+    pub fn scalar_multiply(ct: &ElGamalCiphertext, scalar: &Fr) -> ElGamalCiphertext {
+        ElGamalCiphertext::new(ct.c1 * scalar, ct.c2 * scalar)
+    }
+
+    pub fn rerandomize<R: RngCore + CryptoRng>(
+        ct: &ElGamalCiphertext,
+        pk: &EdwardsProjective,
+        rng: &mut R,
+    ) -> ElGamalCiphertext {
+        let r = Fr::rand(rng);
+        let generator = EdwardsProjective::generator();
+        
+        ElGamalCiphertext::new(ct.c1 + generator * r, ct.c2 + *pk * r)
+    }
 }
 
-/// Generate a new ElGamal key pair
-pub fn generate_keypair(rng: &mut StdRng) -> (JubJubScalar, JubJubExtended) {
-    // Generate private key
-    let sk = JubJubScalar::random(rng);
-    
-    // Compute public key
-    let pk = GENERATOR_EXTENDED * &sk;
-    
-    (sk, pk)
+pub fn generator() -> EdwardsProjective {
+    EdwardsProjective::generator()
+}
+
+pub fn generator_affine() -> EdwardsAffine {
+    EdwardsAffine::generator()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+    use ark_std::rand::rngs::StdRng;
+    use ark_std::rand::SeedableRng;
+
     #[test]
-    fn test_elgamal_encryption_decryption() {
-        let mut rng = StdRng::seed_from_u64(0xc0b);
+    fn test_elgamal_encrypt_decrypt() {
+        let mut rng = StdRng::seed_from_u64(0x12345678);
         
-        // Generate key pair
-        let (sk, pk) = generate_keypair(&mut rng);
+        let (sk, pk) = ElGamal::generate_keypair(&mut rng);
         
-        // Create a test message
-        let message = GENERATOR_EXTENDED * JubJubScalar::from(1234u64);
+        let message = EdwardsProjective::generator() * Fr::from(1234u64);
         
-        // Encrypt the message
-        let ciphertext = encrypt(&pk, &message, &mut rng).unwrap();
+        let ciphertext = ElGamal::encrypt(&pk, &message, &mut rng).unwrap();
         
-        // Decrypt the message
         let decrypted = ciphertext.decrypt(&sk);
         
-        // Verify the decryption
         assert_eq!(message, decrypted);
     }
 
     #[test]
-    fn test_keypair_generation() {
-        let mut rng = StdRng::seed_from_u64(0x123);
+    fn test_scalar_encrypt_decrypt() {
+        let mut rng = StdRng::seed_from_u64(0x87654321);
         
-        // Generate two different key pairs
-        let (sk1, pk1) = generate_keypair(&mut rng);
-        let (sk2, pk2) = generate_keypair(&mut rng);
+        let (sk, pk) = ElGamal::generate_keypair(&mut rng);
         
-        // Verify that different key pairs are generated
-        assert_ne!(sk1, sk2);
-        assert_ne!(pk1, pk2);
+        let message_scalar = Fr::from(42u64);
         
-        // Verify that public key is derived correctly from private key
-        assert_eq!(pk1, GENERATOR_EXTENDED * &sk1);
-        assert_eq!(pk2, GENERATOR_EXTENDED * &sk2);
-    }
-
-    #[test]
-    fn test_multiple_encryptions() {
-        let mut rng = StdRng::seed_from_u64(0x456);
-        let (sk, pk) = generate_keypair(&mut rng);
+        let ciphertext = ElGamal::encrypt_scalar(&pk, &message_scalar, &mut rng).unwrap();
         
-        // Test multiple messages
-        let messages = vec![
-            GENERATOR_EXTENDED * JubJubScalar::from(1u64),
-            GENERATOR_EXTENDED * JubJubScalar::from(42u64),
-            GENERATOR_EXTENDED * JubJubScalar::from(999u64),
-        ];
+        let decrypted_scalar = ElGamal::decrypt_to_scalar(&ciphertext, &sk);
         
-        for message in messages {
-            let ciphertext = encrypt(&pk, &message, &mut rng).unwrap();
-            let decrypted = ciphertext.decrypt(&sk);
-            assert_eq!(message, decrypted);
-        }
-    }
-
-    #[test]
-    fn test_ciphertext_creation() {
-        let mut rng = StdRng::seed_from_u64(0x789);
-        let (_, pk) = generate_keypair(&mut rng);
-        let message = GENERATOR_EXTENDED * JubJubScalar::from(100u64);
-        
-        let ciphertext = encrypt(&pk, &message, &mut rng).unwrap();
-        
-        // Verify ciphertext components are not zero
-        assert_ne!(ciphertext.c1, JubJubExtended::default());
-        assert_ne!(ciphertext.c2, JubJubExtended::default());
+        assert_eq!(decrypted_scalar, Some(message_scalar));
     }
 
     #[test]
     fn test_homomorphic_addition() {
-        let mut rng = StdRng::seed_from_u64(0xabc);
-        let (sk, pk) = generate_keypair(&mut rng);
+        let mut rng = StdRng::seed_from_u64(0xabcdef);
         
-        // Create two test messages
-        let message1 = GENERATOR_EXTENDED * JubJubScalar::from(100u64);
-        let message2 = GENERATOR_EXTENDED * JubJubScalar::from(200u64);
+        let (sk, pk) = ElGamal::generate_keypair(&mut rng);
         
-        // Encrypt each message separately
-        let ciphertext1 = encrypt(&pk, &message1, &mut rng).unwrap();
-        let ciphertext2 = encrypt(&pk, &message2, &mut rng).unwrap();
+        let m1 = Fr::from(10u64);
+        let m2 = Fr::from(20u64);
         
-        // Add the ciphertexts together
-        let sum_ciphertext = ElGamalCiphertext::new(
-            ciphertext1.c1 + ciphertext2.c1,
-            ciphertext1.c2 + ciphertext2.c2
-        );
+        let ct1 = ElGamal::encrypt_scalar(&pk, &m1, &mut rng).unwrap();
+        let ct2 = ElGamal::encrypt_scalar(&pk, &m2, &mut rng).unwrap();
         
-        // Add the original messages and encrypt the sum
-        let sum_message = message1 + message2;
-        let encrypted_sum = encrypt(&pk, &sum_message, &mut rng).unwrap();
+        let ct_sum = ElGamal::homomorphic_add(&ct1, &ct2);
         
-        // Decrypt both results
-        let decrypted_sum_ciphertext = sum_ciphertext.decrypt(&sk);
-        let decrypted_encrypted_sum = encrypted_sum.decrypt(&sk);
+        let decrypted_sum = ElGamal::decrypt_to_scalar(&ct_sum, &sk);
         
-        // Verify that both decryptions give the same result
-        assert_eq!(decrypted_sum_ciphertext, decrypted_encrypted_sum);
-        
-        // Also verify that the decrypted result equals the sum of original messages
-        assert_eq!(decrypted_sum_ciphertext, sum_message);
+        assert_eq!(decrypted_sum, Some(Fr::from(30u64)));
     }
-} 
+
+    #[test]
+    fn test_scalar_multiplication() {
+        let mut rng = StdRng::seed_from_u64(0xfedcba);
+        
+        let (sk, pk) = ElGamal::generate_keypair(&mut rng);
+        
+        let m = Fr::from(5u64);
+        let scalar = Fr::from(3u64);
+        
+        let ct = ElGamal::encrypt_scalar(&pk, &m, &mut rng).unwrap();
+        
+        let ct_scaled = ElGamal::scalar_multiply(&ct, &scalar);
+        
+        let decrypted_scaled = ElGamal::decrypt_to_scalar(&ct_scaled, &sk);
+        
+        assert_eq!(decrypted_scaled, Some(Fr::from(15u64)));
+    }
+
+    #[test]
+    fn test_rerandomization() {
+        let mut rng = StdRng::seed_from_u64(0x111222);
+        
+        let (sk, pk) = ElGamal::generate_keypair(&mut rng);
+        
+        let message = EdwardsProjective::generator() * Fr::from(999u64);
+        
+        let ct1 = ElGamal::encrypt(&pk, &message, &mut rng).unwrap();
+        
+        let ct2 = ElGamal::rerandomize(&ct1, &pk, &mut rng);
+        
+        assert_ne!(ct1.c1, ct2.c1);
+        assert_ne!(ct1.c2, ct2.c2);
+        
+        let decrypted1 = ct1.decrypt(&sk);
+        let decrypted2 = ct2.decrypt(&sk);
+        
+        assert_eq!(decrypted1, decrypted2);
+    }
+
+    #[test]
+    fn test_keypair_generation() {
+        let mut rng = StdRng::seed_from_u64(0x333444);
+        
+        let (sk1, pk1) = ElGamal::generate_keypair(&mut rng);
+        let (sk2, pk2) = ElGamal::generate_keypair(&mut rng);
+        
+        assert_ne!(sk1, sk2);
+        assert_ne!(pk1, pk2);
+        
+        assert_eq!(pk1, EdwardsProjective::generator() * sk1);
+        assert_eq!(pk2, EdwardsProjective::generator() * sk2);
+    }
+
+    #[test]
+    fn test_curve_properties() {
+        let generator = generator();
+        
+        assert!(!generator.is_zero());
+        
+        let generator_affine = generator_affine();
+        assert!(generator_affine.is_on_curve());
+        
+        let scalar_order = Fr::from_str(
+            "2736030358979909402780800718157159386076813972158567259200215660948447373041"
+        )
+        .unwrap();
+        let should_be_identity = generator * scalar_order;
+        assert!(should_be_identity.is_zero());
+    }
+}
