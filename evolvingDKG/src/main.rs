@@ -2,10 +2,12 @@
 use num_bigint::BigUint;
 use shamir_rs::Scheme;
 // use evolvingDKG::{key_gen, read_keys, Party, PartyList, PKI, BabyJubJubPK, BabyJubJubSK, setup_zk::CircuitSetup, circom_encryption::EncryptionCircuit, elgamal::{self, ElGamalCiphertext}};
-use evolvingDKG::{key_gen, read_keys, Party, PartyList ,PKI, BabyJubJubPK, BabyJubJubSK, };
+use evolvingDKG::{key_gen, read_keys, SigmaTilde, Party, PKI};
+use ark_ed_on_bn254::{EdwardsProjective, Fr};
+use ark_ec::PrimeGroup;
+use ark_ff::PrimeField;
 use std::str::FromStr;
 use rand::{rngs::StdRng, SeedableRng, Rng};
-// use dusk_jubjub::{JubJubExtended, JubJubScalar, GENERATOR_EXTENDED};
 // use serde_json::Value;
 // use group::GroupEncoding;
 use rayon::prelude::*;
@@ -20,7 +22,7 @@ fn debug_print(debug: bool, message: &str) {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Debug flag
-    let debug = false;
+    let debug = true;
 
     println!("================Pre initialization=================");
 
@@ -130,13 +132,84 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     debug_print(debug, &format!("{:?}", parties));
     println!("================Round 1=================");
 
-    // for each old party
-    // for each new party
-        // split old party share
-
+    // Update generation and party counts for Round 1
+    g = 1;
+    let old_n = n;
+    let old_t = t;
+    ng = ng_array[g as usize];
+    n = old_n + ng;
+    t = t_array[g as usize];
+    
+    println!("Round 1 parameters: old_n={}, old_t={}, new ng={}, total n={}, new t={}", 
+             old_n, old_t, ng, n, t);
+    
+    // Decide which parties of old t are online (for demo, assume all old parties are online)
+    let online_old_parties: Vec<usize> = (0..old_n as usize).collect();
+    println!("Online old parties: {:?}", online_old_parties);
+    
+    
+    // Create variable to store all sigma_tilde
+    let mut all_sigma_tilde: Vec<SigmaTilde> = Vec::new();
+    
+    // Get the generator of BabyJubJub curve
+    let generator = EdwardsProjective::generator();
+    
+    // Create new Shamir scheme for the new total number of parties
+    let new_scheme = Scheme::new(t as usize, n as usize, prime.clone())?;
+    
+    // For each old party i among those online
+    for &i in &online_old_parties {
+        let old_party_share = &parties[i].share.share;
+        
+        // Create commitment of share as share*G
+        let share_scalar = Fr::from_str(&old_party_share.to_string()).unwrap();
+        let commitment = generator * share_scalar;
+        
+        // Shamir split old party share to get x_{i,k} for k = {1..n}
+        let shares = new_scheme.split_secret(old_party_share);
+        
+        // For each new party j (new parties have indices from old_n to n-1)
+        for j in old_n..n {
+            let j_idx = j as usize;
+            
+            // Collect all shares except the one for party j
+            let mut shares_for_others = Vec::new();
+            for (idx, share) in shares.iter().enumerate() {
+                if idx != j_idx {
+                    shares_for_others.push((idx, share.value.clone()));
+                }
+            }
+            
+            // Create sigma_tilde
+            let sigma_tilde = SigmaTilde {
+                old_party_index: i,
+                new_party_index: j_idx,
+                commitment: commitment.clone(),
+                shares_for_others,
+                share_for_recipient: shares[j_idx].value.clone(),
+            };
+            
+            // Add to all_sigma_tilde
+            all_sigma_tilde.push(sigma_tilde);
+        }
+    }
+    
+    // Debug print all_sigma_tilde
+    debug_print(debug, &format!("all_sigma_tilde length: {}", all_sigma_tilde.len()));
+    for sigma in &all_sigma_tilde {
+        debug_print(debug, &format!(
+            "SigmaTilde: old_party={}, new_party={}, share_for_recipient={}", 
+            sigma.old_party_index, sigma.new_party_index, sigma.share_for_recipient
+        ));
+    }
+    
+    println!("Created {} sigma_tilde entries", all_sigma_tilde.len());
     println!("================Round 2=================");
 
 
+
+    // at the end of round 2, check that everything is working 
+    // i.e.: aggregate priv and pub keys are the same as in the init phase
 
 
     Ok(())

@@ -1,4 +1,5 @@
 use std::{fmt, fs, hash::Hash, path::Path, process::Command, str::FromStr};
+use ark_ed_on_bn254::{EdwardsProjective};
 use num_bigint::BigUint;
 use serde::{Serialize, Deserialize};
 use anyhow::Result;
@@ -23,6 +24,16 @@ pub struct Share {
     pub pk: BabyJubJubPK,
     pub share: BigUint,
     pub encr_share: Option<Vec<ElGamalCiphertext>>, // Encrypted share using ElGamal
+}
+
+// Structure to hold sigma_tilde data in round one
+#[derive(Debug, Clone)]
+pub struct SigmaTilde {
+    pub old_party_index: usize,
+    pub new_party_index: usize,
+    pub commitment: EdwardsProjective,
+    pub shares_for_others: Vec<(usize, BigUint)>, // (party_index, share_value)
+    pub share_for_recipient: BigUint,
 }
 
 impl Share {
