@@ -94,7 +94,7 @@ impl CurveConverter {
         let x_e = x_m / y_m;
         let y_e = (x_m - Fq::ONE) / (x_m + Fq::ONE);
 
-        Some(EdwardsAffine::new(x_e, y_e))
+        Some(EdwardsAffine::new_unchecked(x_e, y_e))
     }
 
     /// Convert point from Montgomery to Short Weierstrass form

@@ -173,7 +173,7 @@ impl Elligator2 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::CurveConverter;
+    use crate::curve_converter::CurveConverter;
     use ark_ff::UniformRand;
     use ark_std::test_rng;
     
