@@ -1,6 +1,7 @@
 // use anyhow::Result;
 use num_bigint::BigUint;
-use shamir_rs::Scheme;
+use shamir_rs::{Scheme, ;
+use shamir_rs::Share as SsShare;
 // use evolvingDKG::{key_gen, read_keys, Party, PartyList, PKI, BabyJubJubPK, BabyJubJubSK, setup_zk::CircuitSetup, circom_encryption::EncryptionCircuit, elgamal::{self, ElGamalCiphertext}};
 use evolvingDKG::{key_gen, read_keys, SigmaTilde, Party, PKI, elgamal::ElGamalCiphertext};
 use ark_ed_on_bn254::{EdwardsProjective, Fr, Fq};
@@ -425,11 +426,102 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Created {} sigma_tilde entries", all_sigma_tilde.len());
     println!("================Round 2=================");
 
+    // Process shares for each new party
+    let mut new_party_final_shares: Vec<BigUint> = Vec::new();
+    
+    // For each new party j
+    for j in old_n..n {
+        let j_idx = j as usize;
+        let new_party = &new_parties[j_idx - old_n as usize];
+        
+        println!("\n--- Processing shares for new party {} ---", j);
+        
+        // Collect all shares that party j receives from old parties
+        let mut shares_from_old_parties: Vec<BigUint> = Vec::new();
+        let mut decryption_count = 0;
+        let mut j_final_share = BigUint::from(0u32);
+        
+        // Find all sigma_tilde entries for this new party
+        for sigma_tilde in &all_sigma_tilde {
+            if sigma_tilde.new_party_index == j_idx {
+                // Decrypt the shares using party j's secret key
+                let elgamal_sk = Fr::from_str(&new_party.share.sk.value.to_string()).unwrap();
+                // Find the encrypted share for party j
+                let encrypted_share = &sigma_tilde.encrypted_shares[0].1; // Assuming we want the first encrypted share
+                
+                
+                // Also decrypt the shares that were encrypted for party j
+                // (these are shares intended for other parties but encrypted with j's key) 
+                if let Some(decrypted_fr) = evolvingDKG::elgamal::ElGamal::decrypt_to_scalar(encrypted_share, &elgamal_sk) {
+                    decryption_count += 1;
+                    debug_print(debug, &format!("  Decrypted share from old party {}", sigma_tilde.old_party_index));
+                    j_final_share = (j_final_share + fr_to_biguint(&decrypted_fr)) % &prime;
+                }
+            }
+        
+        }
+        
+        println!("  Received {} shares from old parties", shares_from_old_parties.len());
+        println!("  Successfully decrypted {} encrypted shares", decryption_count);
+        
 
-
-    // at the end of round 2, check that everything is working 
-    // i.e.: aggregate priv and pub keys are the same as in the init phase
-
+        
+        new_party_final_shares.push(j_final_share.clone());
+        println!("  New party {} final share: {}", j, j_final_share);
+        
+        // Create commitment for verification
+        let share_scalar = Fr::from_str(&j_final_share.to_string()).unwrap();
+        let commitment = EdwardsProjective::generator() * share_scalar;
+        debug_print(debug, &format!("  New party {} commitment: {:?}", j, commitment));
+    }
+    
+    // Combine all parties' shares (old + new) to verify the aggregate keys
+    println!("\n--- Verifying aggregate keys ---");
+    
+    // Collect all final shares
+    let mut all_final_shares: Vec<BigUint> = Vec::new();
+    
+    // Add old parties' shares (only the online ones that participated)
+    // for &i in &online_old_parties {
+    //     all_final_shares.push(parties[i].share.share.clone());
+    // }
+    
+    // Add new parties' shares
+    all_final_shares.extend(new_party_final_shares.clone());
+    
+    // Calculate the new aggregated private key
+    let mut new_aggregated_private_key = BigUint::from(0u32);
+    for share in &all_final_shares {
+        new_aggregated_private_key = (new_aggregated_private_key + share) % &prime;
+    }
+    
+    println!("\nNew aggregated private key: {}", new_aggregated_private_key);
+    
+    // Calculate the new aggregated public key
+    let new_aggregated_private_key_fr = Fr::from_str(&new_aggregated_private_key.to_string()).unwrap();
+    let new_aggregated_public_key = EdwardsProjective::generator() * new_aggregated_private_key_fr;
+    let new_aggregated_public_key_affine = new_aggregated_public_key.into_affine();
+    
+    println!("New aggregated public key: ({}, {})", 
+             new_aggregated_public_key_affine.x, 
+             new_aggregated_public_key_affine.y);
+    
+    // Verify that the aggregate keys match
+    if aggregated_private_key == new_aggregated_private_key {
+        println!("\n✓ SUCCESS: Aggregate private keys match!");
+    } else {
+        println!("\n✗ ERROR: Aggregate private keys do NOT match!");
+        println!("  Original: {}", aggregated_private_key);
+        println!("  New:      {}", new_aggregated_private_key);
+    }
+    
+    if aggregated_public_key_affine == new_aggregated_public_key_affine {
+        println!("✓ SUCCESS: Aggregate public keys match!");
+    } else {
+        println!("✗ ERROR: Aggregate public keys do NOT match!");
+        println!("  Original: ({}, {})", aggregated_public_key_affine.x, aggregated_public_key_affine.y);
+        println!("  New:      ({}, {})", new_aggregated_public_key_affine.x, new_aggregated_public_key_affine.y);
+    }
 
     Ok(())
 }
