@@ -8,6 +8,7 @@ use anyhow::Result;
 pub mod elgamal;
 pub mod elligator;
 pub mod curve_converter;
+pub mod polynomial;
 use elgamal::ElGamalCiphertext;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Hash)]

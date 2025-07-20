@@ -1,7 +1,7 @@
 // use anyhow::Result;
 use num_bigint::BigUint;
 use shamir_rs::{Scheme};
-use crate::polynomial::{Polynomial, Point};
+use evolvingDKG::polynomial::{Polynomial, Point};
 // use evolvingDKG::{key_gen, read_keys, Party, PartyList, PKI, BabyJubJubPK, BabyJubJubSK, setup_zk::CircuitSetup, circom_encryption::EncryptionCircuit, elgamal::{self, ElGamalCiphertext}};
 use evolvingDKG::{key_gen, read_keys, SigmaTilde, Party, PKI, elgamal::ElGamalCiphertext};
 use ark_ed_on_bn254::{EdwardsProjective, Fr, Fq};
@@ -258,10 +258,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     debug_print(debug, &format!("{:?}", parties));
 
     // Create an aggregated private key as a sum of the final_shares components
-    let mut aggregated_private_key = BigUint::from(0u32);
-    for share in &final_shares {
-        aggregated_private_key = (aggregated_private_key + share) % &prime;
-    }
+    
+    let poly = Polynomial::new(prime.clone());
+    let points: Vec<Point> = final_shares.iter().enumerate()
+        .map(|(i, share)| Point::new(BigUint::from((i + 1) as u32), share.clone()))
+        .collect();
+
+    let aggregated_private_key = poly.lagrange_interpolate_at_zero(&points).unwrap();
     println!("\nAggregated private key: {}", aggregated_private_key);
     
     // From that aggregated private key compute an aggregated public key which basically is a point on the baby jubjub curve
@@ -447,7 +450,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 // Decrypt the shares using party j's secret key
                 let elgamal_sk = Fr::from_str(&new_party.share.sk.value.to_string()).unwrap();
                 // Find the encrypted share for party j
-                let encrypted_share = &sigma_tilde.encrypted_shares[0].1; // Assuming we want the first encrypted share
+                let encrypted_share = &sigma_tilde.encrypted_shares[j_idx].1; // Assuming we want the first encrypted share
                 
                 
                 // Also decrypt the shares that were encrypted for party j
@@ -490,11 +493,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     all_final_shares.extend(new_party_final_shares.clone());
     
     // Calculate the new aggregated private key
+    let poly2 = Polynomial::new(prime.clone());
+    let points: Vec<Point> = all_final_shares.iter().enumerate()
+        .map(|(i, share)| Point::new(BigUint::from((i + 1) as u32), share.clone()))
+        .collect();
 
-    let mut new_aggregated_private_key = BigUint::from(0u32);
-    for share in &all_final_shares {
-        new_aggregated_private_key = (new_aggregated_private_key + share) % &prime;
-    }
+    let new_aggregated_private_key = poly2.lagrange_interpolate_at_zero(&points).unwrap();
+
+    // let mut new_aggregated_private_key = BigUint::from(0u32);
+    // for share in &all_final_shares {
+    //     new_aggregated_private_key = (new_aggregated_private_key + share) % &prime;
+    // }
     
     println!("\nNew aggregated private key: {}", new_aggregated_private_key);
     
