@@ -329,13 +329,20 @@ fn phase2(
     
     for &party_id in &new_parties {
         let shares = new_party_shares.get(&party_id).unwrap();
-        let sum = shares.iter().fold(BigUint::zero(), |acc, s| poly.mod_add(&acc, s));
         
-        let is_compatible = is_elligator_compatible(&sum, mont_a, mont_b, prime);
+        // Create points from the shares received from old parties
+        let share_points: Vec<Point> = old_party_indices.iter().zip(shares.iter())
+            .map(|(&old_id, share)| Point::new(BigUint::from(old_id as u32), share.clone()))
+            .collect();
+        
+        // Compute aggregated share as interpolation at zero
+        let aggregated_share = poly.lagrange_interpolate_at_zero(&share_points).unwrap();
+        
+        let is_compatible = is_elligator_compatible(&aggregated_share, mont_a, mont_b, prime);
         println!("  P{}: S{} = {} (Elligator: {})", 
-                 party_id, party_id, sum, if is_compatible { "✓" } else { "✗" });
+                 party_id, party_id, aggregated_share, if is_compatible { "✓" } else { "✗" });
         
-        new_aggregated_shares.push((party_id, sum));
+        new_aggregated_shares.push((party_id, aggregated_share));
     }
     
     // Reconstruct using random subset of new shares
@@ -356,9 +363,8 @@ fn phase2(
     let new_aggregated_key = poly.lagrange_interpolate_at_zero(&new_points).unwrap();
     
     println!("\nNew aggregated private key = {}", new_aggregated_key);
-    println!("Sum of selected old shares = {}", selected_shares_sum);
-    println!("Verification: new key matches sum of selected old shares: {}", 
-             new_aggregated_key == selected_shares_sum);
+    println!("Verification: new key matches old key: {}", 
+             new_aggregated_key == _original_key);
     
     // Count how many shares are Elligator-compatible
     let total_shares = new_aggregated_shares.len();

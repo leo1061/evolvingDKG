@@ -197,9 +197,16 @@ fn phase2(poly: &Polynomial, _prime: &BigUint, original_key: BigUint, all_shares
     
     for &party_id in &new_parties {
         let shares = new_party_shares.get(&party_id).unwrap();
-        let sum = shares.iter().fold(BigUint::zero(), |acc, s| poly.mod_add(&acc, s));
-        println!("  P{}: S{} = {}", party_id, party_id, sum);
-        new_aggregated_shares.push((party_id, sum));
+        
+        // Create points from the shares received from old parties
+        let share_points: Vec<Point> = old_party_indices.iter().zip(shares.iter())
+            .map(|(&old_id, share)| Point::new(BigUint::from(old_id as u32), share.clone()))
+            .collect();
+        
+        // Compute aggregated share as interpolation at zero
+        let aggregated_share = poly.lagrange_interpolate_at_zero(&share_points).unwrap();
+        println!("  P{}: S{} = {}", party_id, party_id, aggregated_share);
+        new_aggregated_shares.push((party_id, aggregated_share));
     }
     
     // Reconstruct using random subset of new shares
