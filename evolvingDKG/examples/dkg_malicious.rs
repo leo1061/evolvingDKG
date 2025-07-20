@@ -5,11 +5,14 @@ use rand::seq::SliceRandom;
 use std::collections::HashMap;
 use std::str::FromStr;
 use ark_ed_on_bn254::Fq;
-use ark_ff::PrimeField;
+use ark_ff::{PrimeField, BigInteger};
 
 // Import the polynomial module and Elligator
 use evolvingDKG::polynomial::{Polynomial, Point};
 use evolvingDKG::curve_converter::{CurveConverter, Elligator2};
+use evolvingDKG::{PKI, key_gen, read_keys};
+use evolvingDKG::elgamal::{ElGamal, ElGamalCiphertext};
+use ark_ed_on_bn254::{EdwardsProjective, Fr};
 
 // Prime modulus for the finite field (BN254 scalar field)
 const PRIME: &str = "2736030358979909402780800718157159386076813972158567259200215660948447373041";
@@ -19,10 +22,59 @@ const PHASE1_PARTIES: usize = 5;
 const PHASE1_THRESHOLD: usize = 3;
 const PHASE2_PARTIES: usize = 6;
 const PHASE2_THRESHOLD: usize = 4;
-const MAX_ELLIGATOR_ATTEMPTS: usize = 20_000;
+const MAX_ELLIGATOR_ATTEMPTS: usize = 25_000;
+
+// Utility functions for BigUint/Fr conversion
+fn biguint_to_fr(big: &BigUint) -> Fr {
+    let bytes = big.to_bytes_le();
+    Fr::from_le_bytes_mod_order(&bytes)
+}
+
+fn fr_to_biguint(fr: &Fr) -> BigUint {
+    let bytes = fr.into_bigint().to_bytes_le();
+    BigUint::from_bytes_le(&bytes)
+}
+
+// Setup PKI with BabyJubJub keys for all parties
+fn setup_pki(num_parties: usize) -> PKI {
+    let mut pki = PKI::new();
+    
+    println!("\nGenerating BabyJubJub keypairs:");
+    for i in 1..=num_parties {
+        print!("  Generating keys for party {}...", i);
+        
+        // Generate keypair using external script
+        if let Err(e) = key_gen(i as u32) {
+            println!(" Failed: {}", e);
+            continue;
+        }
+        
+        // Read the generated keys
+        let (_sk, pk) = read_keys(i as u32);
+        pki.add_public_key(pk);
+        println!(" ✓");
+    }
+    
+    pki
+}
+
+// Setup ElGamal keys for all parties
+fn setup_elgamal_keys(num_parties: usize) -> Vec<(Fr, EdwardsProjective)> {
+    let mut rng = rand::thread_rng();
+    let mut keys = Vec::new();
+    
+    println!("\nGenerating ElGamal keypairs:");
+    for i in 1..=num_parties {
+        let (sk, pk) = ElGamal::generate_keypair(&mut rng);
+        keys.push((sk, pk));
+        println!("  Party {}: ElGamal keys ✓", i);
+    }
+    
+    keys
+}
 
 fn main() {
-    println!("=== Malicious-Secure DKG Example (Step 1: Elligator-Compatible Shares) ===\n");
+    println!("=== Malicious-Secure DKG with PKI and Encryption ===\n");
     println!("Phase 1: {} parties, threshold {}", PHASE1_PARTIES, PHASE1_THRESHOLD);
     println!("Phase 2: {} new parties, threshold {}", PHASE2_PARTIES, PHASE2_THRESHOLD);
     
@@ -40,13 +92,22 @@ fn main() {
     
     println!("\nElligator2 is applicable to the Montgomery curve");
     
-    // Phase 1: Initial DKG with Elligator-compatible shares
-    let (phase1_key, all_shares) = phase1(&poly, &prime, &mont_a, &mont_b);
+    // Setup PKI for all parties (phase 1 + phase 2)
+    let total_parties = PHASE1_PARTIES + PHASE2_PARTIES;
+    let mut pki = setup_pki(total_parties);
+    let elgamal_keys = setup_elgamal_keys(total_parties);
+    
+    println!("\nPKI Setup Complete:");
+    println!("  BabyJubJub keys: {} parties", pki.keys.len());
+    println!("  ElGamal keys: {} parties", elgamal_keys.len());
+    
+    // Phase 1: Initial DKG with Elligator-compatible shares and encryption
+    let (phase1_key, all_shares) = phase1(&poly, &prime, &mont_a, &mont_b, &mut pki, &elgamal_keys);
     
     println!("\n{}\n", "=".repeat(60));
     
-    // Phase 2: Resharing with Elligator-compatible shares
-    phase2(&poly, &prime, phase1_key, all_shares, &mont_a, &mont_b);
+    // Phase 2: Resharing with Elligator-compatible shares and encryption
+    phase2(&poly, &prime, phase1_key, all_shares, &mont_a, &mont_b, &pki, &elgamal_keys);
 }
 
 /// Generate Elligator-compatible Shamir shares
@@ -131,6 +192,8 @@ fn phase1(
     prime: &BigUint,
     mont_a: &Fq,
     mont_b: &Fq,
+    _pki: &mut PKI,
+    elgamal_keys: &[(Fr, EdwardsProjective)],
 ) -> (BigUint, Vec<(usize, BigUint)>) {
     println!("\n=== PHASE 1 ===");
     println!("Creating {} parties with threshold {} (polynomial degree {})", 
@@ -150,10 +213,12 @@ fn phase1(
         party_secrets.push(secret);
     }
     
-    // Step 2: Generate Elligator-compatible shares
+    // Step 2: Generate Elligator-compatible shares and encrypt them
     let mut all_shares: HashMap<(usize, usize), BigUint> = HashMap::new();
+    let mut encrypted_shares: HashMap<(usize, usize), ElGamalCiphertext> = HashMap::new();
+    let mut rng = rand::thread_rng();
     
-    println!("\nStep 2: Generating Elligator-compatible Shamir shares...");
+    println!("\nStep 2: Generating Elligator-compatible Shamir shares and encrypting...");
     for i in 1..=PHASE1_PARTIES {
         let secret = &party_secrets[i-1];
         
@@ -162,10 +227,28 @@ fn phase1(
         
         match generate_elligator_compatible_shares(poly, secret, PHASE1_PARTIES, PHASE1_THRESHOLD, mont_a, mont_b, prime) {
             Some(shares) => {
-                println!(" ✓");
+                print!(" ✓ Encrypting...");
+                std::io::Write::flush(&mut std::io::stdout()).unwrap();
+                
                 for (j, value) in shares {
-                    all_shares.insert((i, j), value);
+                    // Store the share
+                    all_shares.insert((i, j), value.clone());
+                    
+                    // Encrypt the share using the recipient's ElGamal public key
+                    let recipient_pk = &elgamal_keys[j-1].1; // j-1 because arrays are 0-indexed
+                    let share_fr = biguint_to_fr(&value);
+                    
+                    match ElGamal::encrypt_scalar(recipient_pk, &share_fr, &mut rng) {
+                        Ok(ciphertext) => {
+                            encrypted_shares.insert((i, j), ciphertext);
+                        }
+                        Err(e) => {
+                            println!(" ✗ Encryption failed: {}", e);
+                            panic!("Unable to encrypt share for party {}", j);
+                        }
+                    }
                 }
+                println!(" ✓");
             }
             None => {
                 println!(" ✗ Failed after {} attempts!", MAX_ELLIGATOR_ATTEMPTS);
@@ -173,6 +256,26 @@ fn phase1(
             }
         }
     }
+    
+    println!("\nStep 2.5: Verifying encryption/decryption...");
+    let mut successful_decryptions = 0;
+    let mut total_encryptions = 0;
+    
+    for ((i, j), ciphertext) in &encrypted_shares {
+        total_encryptions += 1;
+        let recipient_sk = &elgamal_keys[j-1].0; // j-1 because arrays are 0-indexed
+        
+        if let Some(decrypted_fr) = ElGamal::decrypt_to_scalar(ciphertext, recipient_sk) {
+            let decrypted_biguint = fr_to_biguint(&decrypted_fr);
+            let original_share = all_shares.get(&(*i, *j)).unwrap();
+            
+            if &decrypted_biguint == original_share {
+                successful_decryptions += 1;
+            }
+        }
+    }
+    
+    println!("  Successful decryptions: {}/{}", successful_decryptions, total_encryptions);
     
     // Step 3: Aggregate shares
     let mut aggregated_shares = Vec::new();
@@ -187,9 +290,8 @@ fn phase1(
         }
         
         // Verify aggregated share is still Elligator-compatible
-        let is_compatible = is_elligator_compatible(&sum_j, mont_a, mont_b, prime);
-        println!("  P{}: S{} = {} (Elligator: {})", j, j, sum_j, 
-                 if is_compatible { "✓" } else { "✗" });
+        // let is_compatible = is_elligator_compatible(&sum_j, mont_a, mont_b, prime);
+        println!("  P{}: S{} = {} ", j, j, sum_j);
         
         aggregated_shares.push((j, sum_j));
     }
@@ -223,6 +325,8 @@ fn phase2(
     all_shares: Vec<(usize, BigUint)>,
     mont_a: &Fq,
     mont_b: &Fq,
+    _pki: &PKI,
+    elgamal_keys: &[(Fr, EdwardsProjective)],
 ) {
     println!("=== PHASE 2 ===");
     println!("Resharing to {} new parties with threshold {}", PHASE2_PARTIES, PHASE2_THRESHOLD);
@@ -246,9 +350,9 @@ fn phase2(
         old_parties.push((idx, share.clone()));
         selected_shares_sum = poly.mod_add(&selected_shares_sum, share);
         
-        let is_compatible = is_elligator_compatible(share, mont_a, mont_b, prime);
-        println!("  P{} contributes S{} = {} (Elligator: {})", 
-                 idx, idx, share, if is_compatible { "✓" } else { "✗" });
+        // let is_compatible = is_elligator_compatible(share, mont_a, mont_b, prime);
+        println!("  P{} contributes S{} = {}", 
+                 idx, idx, share);
     }
     
     // Create new party IDs
@@ -257,13 +361,15 @@ fn phase2(
     
     println!("\nNew parties: P{} through P{}", new_parties[0], new_parties[new_parties.len()-1]);
     
-    // Each selected old party creates new Elligator-compatible shares
+    // Each selected old party creates new Elligator-compatible shares and encrypts them
     let mut new_party_shares: HashMap<usize, Vec<BigUint>> = HashMap::new();
+    let mut encrypted_new_shares: HashMap<(usize, usize), ElGamalCiphertext> = HashMap::new();
+    
     for &party_id in &new_parties {
         new_party_shares.insert(party_id, Vec::new());
     }
     
-    println!("\nPhase 2 resharing with Elligator-compatible shares:");
+    println!("\nPhase 2 resharing with Elligator-compatible shares and encryption:");
     for (old_party_id, old_share) in &old_parties {
         print!("  P{} generating new shares...", old_party_id);
         std::io::Write::flush(&mut std::io::stdout()).unwrap();
@@ -304,14 +410,32 @@ fn phase2(
             }
             
             if all_compatible {
-                if attempts > 1 {
-                    println!(" ✓ Found Elligator-compatible shares after {} attempts", attempts);
-                } else {
-                    println!(" ✓");
-                }
+                print!(" ✓ Encrypting...");
+                std::io::Write::flush(&mut std::io::stdout()).unwrap();
                 
                 for (party_id, value) in shares {
-                    new_party_shares.get_mut(&party_id).unwrap().push(value);
+                    // Store the share
+                    new_party_shares.get_mut(&party_id).unwrap().push(value.clone());
+                    
+                    // Encrypt the share using the new party's ElGamal public key
+                    let recipient_pk = &elgamal_keys[party_id - 1].1; // party_id - 1 for 0-indexing
+                    let share_fr = biguint_to_fr(&value);
+                    
+                    match ElGamal::encrypt_scalar(recipient_pk, &share_fr, &mut rng) {
+                        Ok(ciphertext) => {
+                            encrypted_new_shares.insert((*old_party_id, party_id), ciphertext);
+                        }
+                        Err(e) => {
+                            println!(" ✗ Encryption failed: {}", e);
+                            panic!("Unable to encrypt share for new party {}", party_id);
+                        }
+                    }
+                }
+                
+                if attempts > 1 {
+                    println!(" ✓ Complete after {} attempts", attempts);
+                } else {
+                    println!(" ✓ Complete");
                 }
                 found = true;
             }
@@ -322,6 +446,29 @@ fn phase2(
             panic!("Unable to generate Elligator-compatible shares for party {}", old_party_id);
         }
     }
+    
+    println!("\nPhase 2 encryption verification:");
+    let mut successful_new_decryptions = 0;
+    let mut total_new_encryptions = 0;
+    
+    for ((old_id, new_id), ciphertext) in &encrypted_new_shares {
+        total_new_encryptions += 1;
+        let recipient_sk = &elgamal_keys[new_id - 1].0; // new_id - 1 for 0-indexing
+        
+        if let Some(decrypted_fr) = ElGamal::decrypt_to_scalar(ciphertext, recipient_sk) {
+            let decrypted_biguint = fr_to_biguint(&decrypted_fr);
+            // Find the original share in new_party_shares
+            let shares_for_party = new_party_shares.get(new_id).unwrap();
+            let old_party_index = old_party_indices.iter().position(|&x| x == *old_id).unwrap();
+            let original_share = &shares_for_party[old_party_index];
+            
+            if &decrypted_biguint == original_share {
+                successful_new_decryptions += 1;
+            }
+        }
+    }
+    
+    println!("  Phase 2 successful decryptions: {}/{}", successful_new_decryptions, total_new_encryptions);
     
     // New parties aggregate their received shares
     println!("\nNew parties aggregate their received shares:");
@@ -338,9 +485,9 @@ fn phase2(
         // Compute aggregated share as interpolation at zero
         let aggregated_share = poly.lagrange_interpolate_at_zero(&share_points).unwrap();
         
-        let is_compatible = is_elligator_compatible(&aggregated_share, mont_a, mont_b, prime);
-        println!("  P{}: S{} = {} (Elligator: {})", 
-                 party_id, party_id, aggregated_share, if is_compatible { "✓" } else { "✗" });
+        // let is_compatible = is_elligator_compatible(&aggregated_share, mont_a, mont_b, prime);
+        println!("  P{}: S{} = {}", 
+                 party_id, party_id, aggregated_share);
         
         new_aggregated_shares.push((party_id, aggregated_share));
     }
@@ -366,12 +513,5 @@ fn phase2(
     println!("Verification: new key matches old key: {}", 
              new_aggregated_key == _original_key);
     
-    // Count how many shares are Elligator-compatible
-    let total_shares = new_aggregated_shares.len();
-    let compatible_shares = new_aggregated_shares.iter()
-        .filter(|(_, share)| is_elligator_compatible(share, mont_a, mont_b, prime))
-        .count();
-    
-    println!("\nElligator compatibility summary:");
-    println!("  Compatible shares: {}/{}", compatible_shares, total_shares);
+
 }

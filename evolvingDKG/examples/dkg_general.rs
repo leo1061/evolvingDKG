@@ -5,8 +5,12 @@ use rand::seq::SliceRandom;
 use std::collections::HashMap;
 use std::str::FromStr;
 
-// Import the polynomial module
+// Import the polynomial module and encryption
 use evolvingDKG::polynomial::{Polynomial, Point};
+use evolvingDKG::{PKI, BabyJubJubPK, BabyJubJubSK, key_gen, read_keys};
+use evolvingDKG::elgamal::{ElGamal, ElGamalCiphertext};
+use ark_ed_on_bn254::{EdwardsProjective, Fr};
+use ark_ff::{PrimeField, BigInteger};
 
 // Prime modulus for the finite field (BN254 scalar field)
 const PRIME: &str = "2736030358979909402780800718157159386076813972158567259200215660948447373041";
@@ -17,21 +21,79 @@ const PHASE1_THRESHOLD: usize = 3;
 const PHASE2_PARTIES: usize = 6;  // Number of new parties
 const PHASE2_THRESHOLD: usize = 4;
 
+// Utility functions for BigUint/Fr conversion
+fn biguint_to_fr(big: &BigUint) -> Fr {
+    let bytes = big.to_bytes_le();
+    Fr::from_le_bytes_mod_order(&bytes)
+}
+
+fn fr_to_biguint(fr: &Fr) -> BigUint {
+    let bytes = fr.into_bigint().to_bytes_le();
+    BigUint::from_bytes_le(&bytes)
+}
+
+// Setup PKI with BabyJubJub keys for all parties
+fn setup_pki(num_parties: usize) -> PKI {
+    let mut pki = PKI::new();
+    
+    println!("\nGenerating BabyJubJub keypairs:");
+    for i in 1..=num_parties {
+        print!("  Generating keys for party {}...", i);
+        
+        // Generate keypair using external script
+        if let Err(e) = key_gen(i as u32) {
+            println!(" Failed: {}", e);
+            continue;
+        }
+        
+        // Read the generated keys
+        let (_sk, pk) = read_keys(i as u32);
+        pki.add_public_key(pk);
+        println!(" ✓");
+    }
+    
+    pki
+}
+
+// Setup ElGamal keys for all parties
+fn setup_elgamal_keys(num_parties: usize) -> Vec<(Fr, EdwardsProjective)> {
+    let mut rng = rand::thread_rng();
+    let mut keys = Vec::new();
+    
+    println!("\nGenerating ElGamal keypairs:");
+    for i in 1..=num_parties {
+        let (sk, pk) = ElGamal::generate_keypair(&mut rng);
+        keys.push((sk, pk));
+        println!("  Party {}: ElGamal keys ✓", i);
+    }
+    
+    keys
+}
+
 fn main() {
-    println!("=== General Two-Phase DKG Example ===\n");
+    println!("=== General Two-Phase DKG Example with PKI and Encryption ===\n");
     println!("Phase 1: {} parties, threshold {}", PHASE1_PARTIES, PHASE1_THRESHOLD);
     println!("Phase 2: {} new parties, threshold {}", PHASE2_PARTIES, PHASE2_THRESHOLD);
     
     let prime = BigUint::from_str(PRIME).unwrap();
     let poly = Polynomial::new(prime.clone());
     
-    // Phase 1: Initial DKG
-    let (phase1_key, all_shares) = phase1(&poly, &prime);
+    // Setup PKI for all parties (phase 1 + phase 2)
+    let total_parties = PHASE1_PARTIES + PHASE2_PARTIES;
+    let mut pki = setup_pki(total_parties);
+    let elgamal_keys = setup_elgamal_keys(total_parties);
     
-    println!("\n");
+    println!("\nPKI Setup Complete:");
+    println!("  BabyJubJub keys: {} parties", pki.keys.len());
+    println!("  ElGamal keys: {} parties", elgamal_keys.len());
     
-    // Phase 2: Resharing with random selection of old parties
-    phase2(&poly, &prime, phase1_key, all_shares);
+    // Phase 1: Initial DKG with encryption
+    let (phase1_key, all_shares) = phase1(&poly, &prime, &mut pki, &elgamal_keys);
+    
+    println!("\n{}", "=".repeat(60));
+    
+    // Phase 2: Resharing with encryption
+    phase2(&poly, &prime, phase1_key, all_shares, &pki, &elgamal_keys);
 }
 
 fn phase1(poly: &Polynomial, _prime: &BigUint) -> (BigUint, Vec<(usize, BigUint)>) {
