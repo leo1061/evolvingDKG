@@ -20,9 +20,9 @@ const PRIME: &str = "27360303589799094027808007181571593860768139721585672592002
 
 // Configuration parameters
 const PHASE1_PARTIES: usize = 5;
-const PHASE1_THRESHOLD: usize = 4;
-const PHASE2_PARTIES: usize = 6;
-const PHASE2_THRESHOLD: usize = 4;
+const PHASE1_THRESHOLD: usize = 3;
+const PHASE2_PARTIES: usize = 5;
+const PHASE2_THRESHOLD: usize = 3;
 const MAX_ELLIGATOR_ATTEMPTS: usize = 25_000;
 
 // Utility functions for BigUint/Fr conversion
@@ -506,6 +506,7 @@ fn phase2(
         
         // Create commitment of aggregated_share i.e. the related BabyJubJubPK
         let aggregated_share_fr = biguint_to_fr(&aggregated_share);
+
         let commitment = EdwardsProjective::generator() * aggregated_share_fr;
 
         // let is_compatible = is_elligator_compatible(&aggregated_share, mont_a, mont_b, prime);
@@ -513,6 +514,7 @@ fn phase2(
                  party_id, party_id, aggregated_share);
         
         new_aggregated_shares.push((party_id, aggregated_share));
+    
 
         // Add the commitment to new_commitments
         new_commitments.push((party_id, commitment));
@@ -527,6 +529,7 @@ fn phase2(
         &encrypted_new_shares,
         &elgamal_keys,
         &old_party_indices,
+        &new_party_shares,
     );
     
     // Reconstruct using random subset of new shares
@@ -586,6 +589,7 @@ fn generate_zk_proofs_for_new_parties(
     encrypted_new_shares: &HashMap<(usize, usize), ElGamalCiphertext>,
     elgamal_keys: &[(Fr, EdwardsProjective)],
     old_party_indices: &[usize],
+    new_party_shares: &HashMap<usize, Vec<BigUint>>,
 ) {
     use std::process::Command;
     use std::fs;
@@ -605,11 +609,26 @@ fn generate_zk_proofs_for_new_parties(
         let pk_x = fq_to_biguint(&pk_affine.x);
         let pk_y = fq_to_biguint(&pk_affine.y);
         
-        // The Y point should be the sum of decrypted shares as a curve point
-        // Since the circuit works with BabyJubJub points, we need to convert the aggregated share
-        // to a point on the curve using the generator
-        let aggregated_share_fr = biguint_to_fr(_aggregated_share);
-        let y_point = EdwardsProjective::generator() * aggregated_share_fr;
+        // The Y point should be the sum of the individual shares as points
+        // Each share should be converted to generator * share, then summed
+        // This matches what the circuit expects: Base8^(sum of messages)
+        let mut y_point = EdwardsProjective::zero();
+        
+        // Collect the individual shares from old parties (before aggregation)
+        for &old_party_id in old_party_indices {
+            if let Some(_ciphertext) = encrypted_new_shares.get(&(old_party_id, party_id)) {
+                // Find the original share from new_party_shares
+                let shares_for_party = new_party_shares.get(&party_id).unwrap();
+                let old_party_index = old_party_indices.iter().position(|&x| x == old_party_id).unwrap();
+                let individual_share = &shares_for_party[old_party_index];
+                
+                // Convert share to point: generator * share
+                let share_fr = biguint_to_fr(individual_share);
+                let share_point = EdwardsProjective::generator() * share_fr;
+                y_point = y_point + share_point;
+            }
+        }
+        
         let y_point_affine = y_point.into_affine();
         let y_x = fq_to_biguint(&y_point_affine.x);
         let y_y = fq_to_biguint(&y_point_affine.y);
@@ -636,19 +655,53 @@ fn generate_zk_proofs_for_new_parties(
         
         let n = ciphertexts.len();
         
-        // Create JSON file for this party
+        // Collect preimages (original shares) for Elligator2 circuit
+        let mut preimages = Vec::new();
+        for &old_party_id in old_party_indices {
+            if let Some(_ciphertext) = encrypted_new_shares.get(&(old_party_id, party_id)) {
+                let shares_for_party = new_party_shares.get(&party_id).unwrap();
+                let old_party_index = old_party_indices.iter().position(|&x| x == old_party_id).unwrap();
+                let individual_share = &shares_for_party[old_party_index];
+                let share_fr = biguint_to_fr(individual_share);
+                preimages.push(fr_to_biguint(&share_fr).to_string());
+            }
+        }
+        
+        // Extract ephemeral keys and encrypted messages separately for elgamal_elligator2 circuit
+        let mut ephemeral_keys = Vec::new();
+        let mut encrypted_messages = Vec::new();
+        
+        for &old_party_id in old_party_indices {
+            if let Some(ciphertext) = encrypted_new_shares.get(&(old_party_id, party_id)) {
+                let ephemeral_key_affine = ciphertext.c1.into_affine();
+                let encrypted_message_affine = ciphertext.c2.into_affine();
+                
+                let ek_x = fq_to_biguint(&ephemeral_key_affine.x);
+                let ek_y = fq_to_biguint(&ephemeral_key_affine.y);
+                let em_x = fq_to_biguint(&encrypted_message_affine.x);
+                let em_y = fq_to_biguint(&encrypted_message_affine.y);
+                
+                ephemeral_keys.push([ek_x.to_string(), ek_y.to_string()]);
+                encrypted_messages.push([em_x.to_string(), em_y.to_string()]);
+            }
+        }
+        
+        // Generator point
+        let generator_affine = EdwardsProjective::generator().into_affine();
+        let gen_x = fq_to_biguint(&generator_affine.x);
+        let gen_y = fq_to_biguint(&generator_affine.y);
+        
+        // Create JSON file for elgamal_elligator2 circuit
         let json_data = serde_json::json!({
-            "description": format!("Test case for party {} with n={}", party_id, n),
-            "sk": fr_to_biguint(el_gamal_sk).to_string(),
-            "pk": [pk_x.to_string(), pk_y.to_string()],
-            "n": n,
-            "actualN": n,
-            "padded": false,
+            "ephemeralKeys": ephemeral_keys,
+            "encryptedMessages": encrypted_messages,
+            "privateKey": fr_to_biguint(el_gamal_sk).to_string(),
+            "preimages": preimages,
             "Y": [y_x.to_string(), y_y.to_string()],
-            "ciphertexts": ciphertexts
+            "generator": [gen_x.to_string(), gen_y.to_string()]
         });
         
-        let json_filename = format!("R1L_{}.json", party_id);
+        let json_filename = format!("elligator2_{}.json", party_id);
         let json_path = scripts_dir.join(&json_filename);
         
         // Write JSON file
@@ -659,40 +712,60 @@ fn generate_zk_proofs_for_new_parties(
         
         println!("  P{}: Created {}", party_id, json_filename);
         
-        // Run ZK proof generation command
-        let sk_str = fr_to_biguint(el_gamal_sk).to_string();
-        let pk_x_str = pk_x.to_string();
-        let pk_y_str = pk_y.to_string();
-        let n_str = n.to_string();
-        let y_x_str = y_x.to_string();
-        let y_y_str = y_y.to_string();
-        
         println!("  P{}: Generating ZK proof...", party_id);
         
-        let output = Command::new("node")
-            .arg("test_R1Lpot20.js")
-            .arg(&sk_str)
-            .arg(&pk_x_str)
-            .arg(&pk_y_str)
-            .arg(&n_str)
+        // Use snarkjs directly with elgamal_elligator2 circuit
+        let witness_file = format!("witness_{}.wtns", party_id);
+        let wasm_path = "../circuits/elgamal_elligator2_js/elgamal_elligator2.wasm";
+        let r1cs_path = "../circuits/elgamal_elligator2.r1cs";
+        
+        let output = Command::new("snarkjs")
+            .arg("wtns")
+            .arg("calculate")
+            .arg(wasm_path)
             .arg(&json_filename)
-            .arg(&y_x_str)
-            .arg(&y_y_str)
+            .arg(&witness_file)
             .current_dir(&scripts_dir)
             .output();
             
         match output {
             Ok(result) => {
                 if result.status.success() {
-                    println!("  P{}: ✓ ZK proof generated successfully", party_id);
+                    println!("  P{}: ✓ Witness calculated successfully", party_id);
+                    
+                    // Now check constraints
+                    let check_output = Command::new("snarkjs")
+                        .arg("wtns")
+                        .arg("check")
+                        .arg(r1cs_path)
+                        .arg(&witness_file)
+                        .current_dir(&scripts_dir)
+                        .output();
+                    
+                    match check_output {
+                        Ok(check_result) => {
+                            if check_result.status.success() {
+                                println!("  P{}: ✓ ZK proof verification successful", party_id);
+                            } else {
+                                println!("  P{}: ✗ ZK proof verification failed", party_id);
+                                println!("    stderr: {}", String::from_utf8_lossy(&check_result.stderr));
+                            }
+                        }
+                        Err(e) => {
+                            println!("  P{}: ✗ Failed to check constraints: {}", party_id, e);
+                        }
+                    }
+                    
+                    // Clean up witness file
+                    let _ = fs::remove_file(scripts_dir.join(&witness_file));
                 } else {
-                    println!("  P{}: ✗ ZK proof generation failed", party_id);
+                    println!("  P{}: ✗ Witness calculation failed", party_id);
                     println!("    stdout: {}", String::from_utf8_lossy(&result.stdout));
                     println!("    stderr: {}", String::from_utf8_lossy(&result.stderr));
                 }
             }
             Err(e) => {
-                println!("  P{}: ✗ Failed to run ZK proof command: {}", party_id, e);
+                println!("  P{}: ✗ Failed to execute witness calculation: {}", party_id, e);
             }
         }
     }

@@ -1,6 +1,6 @@
 
 pragma circom 2.2.2;
-include "decryption.circom";
+include "elgamal_elligator2.circom";
 include "../circomlib/circuits/babyjub.circom";
 include "../circomlib/circuits/bitify.circom";
 include "../circomlib/circuits/escalarmulany.circom";
@@ -308,21 +308,9 @@ template R1L(n) {
     add2.y2 <== dec2.message[1];
     accx[2] <== add2.xout;
     accy[2] <== add2.yout;
-
-    component dec3 = ElGamalDecrypt();
-    dec3.ephemeralKey     <== cipher[3][0];
-    dec3.encryptedMessage <== cipher[3][1];
-    dec3.privateKey       <== sk;
-    component add3 = BabyAdd();
-    add3.x1 <== accx[2];
-    add3.y1 <== accy[2];
-    add3.x2 <== dec3.message[0];
-    add3.y2 <== dec3.message[1];
-    accx[3] <== add3.xout;
-    accy[3] <== add3.yout;
 // confronto finale
     accx[n-1] === Y[0];
     accy[n-1] === Y[1];
 }
 
-component main = R1L(4);
+component main = R1L(3);

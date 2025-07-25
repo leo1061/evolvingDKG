@@ -57,3 +57,5 @@ evolvingDKG/TODO.md
 *copy.*
 scripts/R1L_*.json
 scripts/testdata_*.json
+scripts/elligator2_*.json
+scripts/generate_test_data_R1Lnew.js
