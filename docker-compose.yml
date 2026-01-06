@@ -1,0 +1,56 @@
+version: '3.8'
+
+services:
+  evolvingdkg:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    container_name: evolvingdkg-app
+    volumes:
+      # Persistent volumes for build artifacts
+      - build_data:/app/build
+      - rust_build_data:/app/evolvingDKG/build
+      # Optional: mount source for development
+      # - .:/app:cached
+    ports:
+      - "3000:3000"
+      - "8080:8080"
+    environment:
+      - NODE_ENV=production
+      - RUST_LOG=info
+    networks:
+      - app-network
+    # Override default command for different modes
+    command: ["bash", "-c", "npm test || echo 'Node tests not implemented' && cd evolvingDKG && cargo test"]
+
+  # Development service with mounted volumes for live editing
+  evolvingdkg-dev:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    container_name: evolvingdkg-dev
+    volumes:
+      - .:/app:cached
+      - /app/node_modules
+      - /app/evolvingDKG/target
+    ports:
+      - "3001:3000"
+      - "8081:8080"
+    environment:
+      - NODE_ENV=development
+      - RUST_LOG=debug
+    networks:
+      - app-network
+    command: ["bash", "-c", "tail -f /dev/null"]  # Keep container running for development
+    profiles:
+      - dev
+
+networks:
+  app-network:
+    driver: bridge
+
+volumes:
+  build_data:
+    driver: local
+  rust_build_data:
+    driver: local

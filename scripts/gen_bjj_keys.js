@@ -1,36 +1,36 @@
+// scripts/gen_bjj_keys.js
 const fs = require("fs");
+const path = require("path");
 const crypto = require("crypto");
 const circomlibjs = require("circomlibjs");
 const ff = require("ffjavascript");
 
-(async () => {
-  // Initialize babyjub
+async function genBjjKeys(i) {
   const babyjub = await circomlibjs.buildBabyjub();
 
-  // Generate private key as a random scalar mod babyjub.subOrder
-  const prv = ff.utils.leBuff2int(crypto.randomBytes(32)) % babyjub.subOrder;
+  let sk;
+  do {
+    sk = ff.utils.leBuff2int(crypto.randomBytes(32));
+  } while (sk === BigInt(0) || sk >= babyjub.subOrder);
 
-  // Generate public key as a point using the correct base point
-  const pub = babyjub.mulPointEscalar(babyjub.Base8, prv);
+  const P = babyjub.mulPointEscalar(babyjub.Base8, sk);
+  const pk = [
+    babyjub.F.toObject(P[0]).toString(),
+    babyjub.F.toObject(P[1]).toString(),
+  ];
 
-  // Verify the public key is on the curve
-  if (!babyjub.inCurve(pub)) {
-    throw new Error("Generated public key is not on the curve");
+  // Write files in the working directory (Rust expects this)
+  fs.writeFileSync(`bjj_sk_${i}.txt`, sk.toString());
+  fs.writeFileSync(`bjj_pk_${i}.txt`, JSON.stringify(pk));
+
+  console.log(`Generated BabyJubJub keys for party ${i}`);
+}
+
+(async () => {
+  const i = process.argv[2];
+  if (!i) {
+    console.error("Missing index argument");
+    process.exit(1);
   }
-
-  // Write private key
-  fs.writeFileSync("bjj_sk.txt", prv.toString());
-
-  // Write public key as a JSON array of strings
-  const pubkeyJson = JSON.stringify([
-    babyjub.F.toObject(pub[0]).toString(),
-    babyjub.F.toObject(pub[1]).toString(),
-  ]);
-  fs.writeFileSync("bjj_pk.txt", pubkeyJson);
-
-  console.log("BabyJubJub Private key written to bjj_sk.txt");
-  console.log("BabyJubJub Public key written to bjj_pk.txt");
-  console.log("Private key:", prv.toString());
-  console.log("Public key:", pubkeyJson);
-  console.log("Public key is on curve:", babyjub.inCurve(pub));
+  await genBjjKeys(i);
 })();

@@ -1,0 +1,26 @@
+version: '3.8'
+services:
+  app:
+    build: 
+      context: .
+      dockerfile: Dockerfile.dev
+    volumes:
+      - .:/workspace:cached
+      - deps_cache:/workspace/node_modules
+    ports:
+      - "3000:3000"
+      - "8080:8080"
+    environment:
+      - NODE_ENV=development
+      - PYTHONPATH=/workspace
+    stdin_open: true
+    tty: true
+    networks:
+      - dev-network
+
+networks:
+  dev-network:
+    driver: bridge
+
+volumes:
+  deps_cache:

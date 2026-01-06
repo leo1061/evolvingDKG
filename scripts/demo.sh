@@ -1,5 +1,6 @@
 #!/bin/bash
 
+
 set -e
 
 # Function to clean up build artifacts
@@ -7,7 +8,7 @@ cleanup() {
     echo "🧹 Cleaning up build artifacts..."
     rm -rf build
     mkdir -p build
-    rm -f bjj_sk.txt bjj_pk.txt
+    rm -f bjj_sk*.txt bjj_pk*.txt
     rm -f *.wtns
     if [ -f "package.json" ]; then
         mv package.json package.json.tmp
@@ -22,7 +23,7 @@ cleanup() {
 # Function to handle errors
 handle_error() {
     echo "Error occurred at step: $1"
-    cleanup
+    # cleanup
     exit 1
 }
 
@@ -34,56 +35,42 @@ echo "====================="
 
 # Clean up any existing artifacts
 # cleanup
-mkdir -p build
 
-echo "1. Generating BabyJubJub keys..."
-node scripts/gen_bjj_keys.js
 
-# Use BabyJubJub keys
+# Use Node.js for BabyJubJub key generation
+echo "1. Generating keys..."
+node -e "
+const gen = require('./gen_bjj_keys');
+gen().then(({ sk, pk }) => {
+  const fs = require('fs');
+  fs.writeFileSync('bjj_sk.txt', sk);
+  fs.writeFileSync('bjj_pk.txt', JSON.stringify(pk));
+  console.log('Generated BabyJubJub keys');
+});
+"
+
+# Get the generated keys
 SK=$(cat bjj_sk.txt)
-# Parse public key as numbers (not strings)
-PUBKEY=$(cat bjj_pk.txt | jq '[.[] | tonumber]')
-
-# Optionally, keep the old Rust keygen for reference
-# echo "1. Generating keys..."
-# cd rust-keygen
-# cargo run --bin keygen
-# cd ..
+PUBKEY=$(cat bjj_pk.txt)
 
 echo "2. Compiling circuits..."
 npm run compile-all
 
-echo "3. Keys generated:"
-if [ -f "bjj_sk.txt" ]; then
-    echo "BabyJubJub Private key: bjj_sk.txt"
-else
-    echo "Missing private key"
-    exit 1
-fi
+echo "3. Setting up circuits..."
+# Use our new setup module
+node -e "
+const CircuitSetup = require('./circuits/setup');
+const setup = new CircuitSetup();
+setup.setupAll();
+"
 
-if [ -f "bjj_pk.txt" ]; then
-    echo "BabyJubJub Public key: bjj_pk.txt"
-else
-    echo "Missing public key"
-    exit 1
-fi
-
-echo "4. Circuits compiled:"
-if [ -d "build" ]; then
-    echo "Build directory created"
-    ls -l build
-else
-    echo "Missing build directory"
-    exit 1
-fi
-
-# 5. Encrypt message
+# 4. Encrypt message
 MSG=123
-echo -e "\n5. Encrypting message $MSG..."
-# Encode message as a BabyJubJub point and ensure it's a proper number array
-ENCODED_MSG=$(node scripts/encode_message.js $MSG | grep -o '\[.*\]' | jq '[.[] | tonumber]')
+echo -e "\n4. Encrypting message $MSG..."
+# Encode message as a BabyJubJub point
+ENCODED_MSG=$(node encode_message.js $MSG)
 
-# Generate a random nonce key that's within the field range using BigInt
+# Generate a random nonce key that's within the field range using Node.js
 NONCE_KEY=$(node -e "
 const fieldSize = BigInt('21888242871839275222246405745257275088548364400416034343698204186575808495617');
 const randomBytes = require('crypto').randomBytes(10);
@@ -92,74 +79,61 @@ console.log((randomBigInt % fieldSize).toString());
 ")
 
 # Create input.json for the circuit
-cat > build/input.json << EOF
-{
-    "message": $(echo $ENCODED_MSG | jq '[.[] | tostring]'),
-    "nonceKey": "$NONCE_KEY",
-    "publicKey": $(echo $PUBKEY | jq '[.[] | tostring]')
-}
-EOF
+echo "{
+    \"message\": $ENCODED_MSG,
+    \"nonceKey\": \"$NONCE_KEY\",
+    \"publicKey\": $PUBKEY
+}" > build/input.json
 
-# Generate witness
-cd build/encryption_js
-node generate_witness.js encryption.wasm ../input.json ../witness.wtns
-cd ../..
+# Generate encryption proof using our new module
+echo -e "\n5. Generating and verifying encryption proof..."
+node -e "
+const EncryptionCircuit = require('./circuits/encryption');
+const encryptionCircuit = new EncryptionCircuit();
+const witnessPath = encryptionCircuit.generateWitness(require('./build/input.json'));
+const { proof, public: publicInputs } = encryptionCircuit.generateProof(witnessPath);
+encryptionCircuit.verifyProof(proof, publicInputs);
+"
 
-# Generate zkey files
-echo -e "\n6. Generating zkey files..."
-# snarkjs powersoftau new bn128 12 build/pot12_0000.ptau -v
-snarkjs powersoftau new bn128 14 build/pot12_0000.ptau -v
-
-snarkjs powersoftau contribute build/pot12_0000.ptau build/pot12_0001.ptau --name="First contribution" --entropy="some random text here" -v
-snarkjs powersoftau prepare phase2 build/pot12_0001.ptau build/pot12_final.ptau -v
-
-# Generate encryption zkey files
-snarkjs groth16 setup build/encryption.r1cs build/pot12_final.ptau build/encryption_0000.zkey
-snarkjs zkey contribute build/encryption_0000.zkey build/encryption_0001.zkey --name="First contribution" --entropy="more random text" -v
-snarkjs zkey export verificationkey build/encryption_0001.zkey build/verification_key.json
-cp build/encryption_0001.zkey build/encryption_final.zkey
-
-# Generate decryption zkey files
-snarkjs groth16 setup build/decryption.r1cs build/pot12_final.ptau build/decryption_0000.zkey
-snarkjs zkey contribute build/decryption_0000.zkey build/decryption_0001.zkey --name="First contribution" --entropy="even more random text" -v
-snarkjs zkey export verificationkey build/decryption_0001.zkey build/decrypt_verification_key.json
-cp build/decryption_0001.zkey build/decryption_final.zkey
-# 7. Generate proof
-echo -e "\n7. Generating proof..."
-snarkjs groth16 prove build/encryption_final.zkey build/witness.wtns build/proof.json build/public.json
-
-# 8. Verify proof
-echo -e "\n8. Verifying proof..."
-snarkjs groth16 verify build/verification_key.json build/public.json build/proof.json
-
-# 9. Decrypt message
-echo -e "\n9. Decrypting message..."
+# 6. Decrypt message
+echo -e "\n6. Decrypting message..."
 # Create decryption input
 cat > build/decrypt_input.json << EOF
 {
-  "ephemeralKey": [
-    $(cat build/public.json | jq '.[0]'),
-    $(cat build/public.json | jq '.[1]')
+  "ephemeralKeys": [
+    [$(cat build/public.json | jq '.[0] | tonumber'), $(cat build/public.json | jq '.[1] | tonumber')],
+    [$(cat build/public.json | jq '.[0] | tonumber'), $(cat build/public.json | jq '.[1] | tonumber')],
+    [$(cat build/public.json | jq '.[0] | tonumber'), $(cat build/public.json | jq '.[1] | tonumber')],
+    [$(cat build/public.json | jq '.[0] | tonumber'), $(cat build/public.json | jq '.[1] | tonumber')],
+    [$(cat build/public.json | jq '.[0] | tonumber'), $(cat build/public.json | jq '.[1] | tonumber')]
   ],
-  "encryptedMessage": [
-    $(cat build/public.json | jq '.[2]'),
-    $(cat build/public.json | jq '.[3]')
+
+  "encryptedMessages": [
+    [$(cat build/public.json | jq '.[2] | tonumber'), $(cat build/public.json | jq '.[3] | tonumber')],
+    [$(cat build/public.json | jq '.[2] | tonumber'), $(cat build/public.json | jq '.[3] | tonumber')],
+    [$(cat build/public.json | jq '.[2] | tonumber'), $(cat build/public.json | jq '.[3] | tonumber')],
+    [$(cat build/public.json | jq '.[2] | tonumber'), $(cat build/public.json | jq '.[3] | tonumber')],
+    [$(cat build/public.json | jq '.[2] | tonumber'), $(cat build/public.json | jq '.[3] | tonumber')]
   ],
+
+  "preimages": [1, 1, 1, 1, 1],
+
+  "Y": [0, 0],
+  "generator": [1, 2],
+
   "privateKey": "$SK"
 }
 EOF
 
-cd build/decryption_js
-node generate_witness.js decryption.wasm ../decrypt_input.json ../decrypt_witness.wtns
-cd ../..
+# Generate and verify decryption proof using our new module
+echo -e "\n7. Generating and verifying decryption proof..."
+node -e "
+const DecryptionCircuit = require('./circuits/decryption');
+const decryptionCircuit = new DecryptionCircuit();
+const witnessPath = decryptionCircuit.generateWitness(require('./build/decrypt_input.json'));
+const { proof, public } = decryptionCircuit.generateProof(witnessPath);
+decryptionCircuit.verifyProof(proof, public);
+"
 
-# Generate decryption proof
-snarkjs groth16 prove build/decryption_final.zkey build/decrypt_witness.wtns build/decrypt_proof.json build/decrypt_public.json
-
-# Verify decryption proof
-snarkjs groth16 verify build/decrypt_verification_key.json build/decrypt_public.json build/decrypt_proof.json
-
-echo -e "\nDemo completed successfully!"
-
-
+echo -e "\n✨ Demo completed successfully!"
 echo -e "\n✨ All done! Build artifacts are preserved in the build directory."

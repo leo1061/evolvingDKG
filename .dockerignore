@@ -1,0 +1,39 @@
+# Dependencies
+node_modules
+npm-debug.log
+
+# Build output - now we'll include them since they work locally
+# build
+# evolvingDKG/build
+
+# Rust build artifacts (very large)
+evolvingDKG/target
+target
+
+# Version control
+.git
+.gitignore
+
+# Environment files
+.env
+.env.*
+
+# IDE files
+.vscode
+.idea
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Development only files
+docker-compose.dev.yml
+.claude-config.json
+
+# Key files (generated, not needed in container)
+*.txt
+*.sym
+*.json
+!package.json
+!evolvingDKG/Cargo.toml
+!Cargo.toml 

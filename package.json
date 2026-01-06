@@ -5,9 +5,12 @@
   "main": "index.js",
   "scripts": {
     "install-circom": "npm install circomlib",
-    "compile-encrypt": "circom circuits/encryption.circom --r1cs --wasm --sym -o build/ -l node_modules",
-    "compile-decrypt": "circom circuits/decryption.circom --r1cs --wasm --sym -o build/ -l node_modules",
+    "compile-encrypt": "circom circuits/encryption.circom --r1cs --wasm --sym -o scripts/build/ -l node_modules",
+    "compile-decrypt": "circom circuits/decryption.circom --r1cs --wasm --sym -o scripts/build/ -l node_modules",
     "compile-all": "npm run compile-encrypt && npm run compile-decrypt",
+    "compile-encrypt-rust": "circom circuits/encryption.circom --r1cs --wasm --sym -o evolvingDKG/build/ -l node_modules",
+    "compile-decrypt-rust": "circom circuits/decryption.circom --r1cs --wasm --sym -o evolvingDKG/build/ -l node_modules",
+    "compile-all-rust": "npm run compile-encrypt-rust && npm run compile-decrypt-rust",
     "test": "echo \"Tests not implemented yet\" && exit 1"
   },
   "keywords": [
@@ -21,7 +24,7 @@
   "author": "Your Name",
   "license": "MIT",
   "dependencies": {
-    "circomlib": "^2.0.0",
-    "circomlibjs": "^0.1.2"
+    "circomlib": "^2.0.5",
+    "circomlibjs": "^0.1.7"
   }
 }

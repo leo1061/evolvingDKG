@@ -43,6 +43,19 @@ public.json
 
 # Rust specific
 **/*.rs.bk
-bjj_sk.txt
-bjj_pk.txt
+bjj_sk*.txt
+bjj_pk*.txt
 "circuits/decryption copy.circom"
+
+# claude code related
+.claude-config.json
+.env*
+
+evolvingDKG/remove-emoji.sh
+evolvingDKG/sigma.txt
+evolvingDKG/TODO.md
+*copy.*
+scripts/R1L_*.json
+scripts/testdata_*.json
+scripts/elligator2_*.json
+scripts/generate_test_data_R1Lnew.js
