@@ -1,5 +1,6 @@
 #!/bin/bash
 
+
 set -e
 
 # Function to clean up build artifacts
@@ -35,9 +36,18 @@ echo "====================="
 # Clean up any existing artifacts
 # cleanup
 
-echo "1. Generating keys..."
+
 # Use Node.js for BabyJubJub key generation
-node scripts/gen_bjj_keys.js
+echo "1. Generating keys..."
+node -e "
+const gen = require('./gen_bjj_keys');
+gen().then(({ sk, pk }) => {
+  const fs = require('fs');
+  fs.writeFileSync('bjj_sk.txt', sk);
+  fs.writeFileSync('bjj_pk.txt', JSON.stringify(pk));
+  console.log('Generated BabyJubJub keys');
+});
+"
 
 # Get the generated keys
 SK=$(cat bjj_sk.txt)
@@ -49,7 +59,7 @@ npm run compile-all
 echo "3. Setting up circuits..."
 # Use our new setup module
 node -e "
-const CircuitSetup = require('./scripts/circuits/setup');
+const CircuitSetup = require('./circuits/setup');
 const setup = new CircuitSetup();
 setup.setupAll();
 "
@@ -58,7 +68,7 @@ setup.setupAll();
 MSG=123
 echo -e "\n4. Encrypting message $MSG..."
 # Encode message as a BabyJubJub point
-ENCODED_MSG=$(node scripts/encode_message.js $MSG)
+ENCODED_MSG=$(node encode_message.js $MSG)
 
 # Generate a random nonce key that's within the field range using Node.js
 NONCE_KEY=$(node -e "
@@ -78,7 +88,7 @@ echo "{
 # Generate encryption proof using our new module
 echo -e "\n5. Generating and verifying encryption proof..."
 node -e "
-const EncryptionCircuit = require('./scripts/circuits/encryption');
+const EncryptionCircuit = require('./circuits/encryption');
 const encryptionCircuit = new EncryptionCircuit();
 const witnessPath = encryptionCircuit.generateWitness(require('./build/input.json'));
 const { proof, public: publicInputs } = encryptionCircuit.generateProof(witnessPath);
@@ -90,14 +100,27 @@ echo -e "\n6. Decrypting message..."
 # Create decryption input
 cat > build/decrypt_input.json << EOF
 {
-  "ephemeralKey": [
-    $(cat build/public.json | jq '.[0]'),
-    $(cat build/public.json | jq '.[1]')
+  "ephemeralKeys": [
+    [$(cat build/public.json | jq '.[0] | tonumber'), $(cat build/public.json | jq '.[1] | tonumber')],
+    [$(cat build/public.json | jq '.[0] | tonumber'), $(cat build/public.json | jq '.[1] | tonumber')],
+    [$(cat build/public.json | jq '.[0] | tonumber'), $(cat build/public.json | jq '.[1] | tonumber')],
+    [$(cat build/public.json | jq '.[0] | tonumber'), $(cat build/public.json | jq '.[1] | tonumber')],
+    [$(cat build/public.json | jq '.[0] | tonumber'), $(cat build/public.json | jq '.[1] | tonumber')]
   ],
-  "encryptedMessage": [
-    $(cat build/public.json | jq '.[2]'),
-    $(cat build/public.json | jq '.[3]')
+
+  "encryptedMessages": [
+    [$(cat build/public.json | jq '.[2] | tonumber'), $(cat build/public.json | jq '.[3] | tonumber')],
+    [$(cat build/public.json | jq '.[2] | tonumber'), $(cat build/public.json | jq '.[3] | tonumber')],
+    [$(cat build/public.json | jq '.[2] | tonumber'), $(cat build/public.json | jq '.[3] | tonumber')],
+    [$(cat build/public.json | jq '.[2] | tonumber'), $(cat build/public.json | jq '.[3] | tonumber')],
+    [$(cat build/public.json | jq '.[2] | tonumber'), $(cat build/public.json | jq '.[3] | tonumber')]
   ],
+
+  "preimages": [1, 1, 1, 1, 1],
+
+  "Y": [0, 0],
+  "generator": [1, 2],
+
   "privateKey": "$SK"
 }
 EOF
@@ -105,7 +128,7 @@ EOF
 # Generate and verify decryption proof using our new module
 echo -e "\n7. Generating and verifying decryption proof..."
 node -e "
-const DecryptionCircuit = require('./scripts/circuits/decryption');
+const DecryptionCircuit = require('./circuits/decryption');
 const decryptionCircuit = new DecryptionCircuit();
 const witnessPath = decryptionCircuit.generateWitness(require('./build/decrypt_input.json'));
 const { proof, public } = decryptionCircuit.generateProof(witnessPath);

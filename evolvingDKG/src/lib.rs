@@ -153,17 +153,17 @@ impl fmt::Display for PKI {
 
 
 pub fn key_gen(i: u32) -> Result<()> {
-    // Get the parent directory path
-    let parent_dir = Path::new("..");
+    // Path assoluto alla root del crate
+    let crate_root = Path::new(env!("CARGO_MANIFEST_DIR"));
 
-    // Execute the Node.js script with the correct path
+    // Path corretto allo script
+    let script_path = crate_root.join("../scripts/gen_bjj_keys.js");
+
     let output = Command::new("node")
-        .current_dir(parent_dir) // Set working directory to parent
-        .arg("scripts/gen_bjj_keys.js")
+        .arg(script_path)
         .arg(i.to_string())
         .output()?;
 
-    // Check if the command was successful
     if !output.status.success() {
         let error = String::from_utf8_lossy(&output.stderr);
         anyhow::bail!("Failed to generate keys: {}", error);
@@ -173,14 +173,14 @@ pub fn key_gen(i: u32) -> Result<()> {
 }
 
 pub fn read_keys(i: u32) -> (BabyJubJubSK, BabyJubJubPK) {
-    let sk_file_path = format!("../bjj_sk_{}.txt", i);
+    let sk_file_path = format!("bjj_sk_{}.txt", i);
     let sk_contents =
         fs::read_to_string(sk_file_path).expect("Should have been able to read the file");
     let sk = BabyJubJubSK {
         value: BigUint::from_str(&sk_contents).unwrap(),
     };
 
-    let pk_file_path = format!("../bjj_pk_{}.txt", i);
+    let pk_file_path = format!("bjj_pk_{}.txt", i);
     let pk_contents =
         fs::read_to_string(pk_file_path).expect("Should have been able to read the file");
 

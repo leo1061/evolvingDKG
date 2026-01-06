@@ -207,4 +207,4 @@ template ElGamalDecrypt() {
 }
 
 // Example usage
-//component main = ElGamalDecryptWithElligator2(5); // For 5 ciphertexts
+component main = ElGamalDecryptWithElligator2(5); // For 5 ciphertexts

@@ -79,6 +79,164 @@ fn setup_elgamal_keys(num_parties: usize) -> Vec<(Fr, EdwardsProjective)> {
     keys
 }
 
+/// Finalize the distribute/output phase: reconstruct combined shares using
+/// ciphertexts of Lagrange-weighted shares (λ_k * s_{k->j}) and verify them.
+fn finalize_distribute(
+    poly: &Polynomial,
+    old_party_indices: &[usize],
+    new_parties: &[usize],
+    encrypted_new_shares: &HashMap<(usize, usize), ElGamalCiphertext>,
+    new_party_shares: &HashMap<usize, Vec<BigUint>>,
+    new_aggregated_shares: &[(usize, BigUint)],
+    new_commitments: &[(usize, EdwardsProjective)],
+    elgamal_keys: &[(Fr, EdwardsProjective)],
+    expected_pk: EdwardsProjective,
+) {
+    println!("\n=== DISTRIBUTE: finalize / output phase ===");
+
+    // Coefficienti di Lagrange servono più sotto per l'aggregazione della PK
+    let old_x_coords: Vec<BigUint> = old_party_indices
+        .iter()
+        .map(|&idx| BigUint::from(idx as u32))
+        .collect();
+
+    let lagrange_coeffs = match poly.lagrange_coefficients(&old_x_coords, &BigUint::zero()) {
+        Some(l) => l,
+        None => {
+            println!("  ✗ Failed to compute Lagrange coefficients for old parties");
+            println!("  ✗ Cannot verify decrypted aggregated shares");
+            return;
+        }
+    };
+
+    let mut all_ok = true;
+
+    // Per ogni nuovo party, sommiamo le share λ_k * s_{k->j} decriptate
+    for (idx, &(party_id, ref aggregated_share)) in new_aggregated_shares.iter().enumerate() {
+        println!("\n-- New party P{} verification --", party_id);
+
+        let recipient_sk = &elgamal_keys[party_id - 1].0;
+        let mut accumulated_share_fr = Fr::zero();
+        let mut any_ciphertext = false;
+
+        for &old_id in old_party_indices.iter() {
+            if let Some(ct) = encrypted_new_shares.get(&(old_id, party_id)) {
+                any_ciphertext = true;
+
+                if let Some(decrypted_fr) = ElGamal::decrypt_to_scalar(ct, recipient_sk) {
+                    // decrypted_fr = Fr( λ_k * s_{k->j} ), già pesata in Phase 2
+                    accumulated_share_fr += decrypted_fr;
+                } else {
+                    println!(
+                        "  ✗ Decryption failed for share from old party P{} to P{}",
+                        old_id, party_id
+                    );
+                    all_ok = false;
+                }
+            } else {
+                println!(
+                    "  Warning: missing ciphertext from old party P{} -> P{} (skipping this contribution)",
+                    old_id, party_id
+                );
+            }
+        }
+
+        if !any_ciphertext {
+            println!(
+                "  ✗ No ciphertexts found to reconstruct aggregated share for P{}",
+                party_id
+            );
+            all_ok = false;
+            continue;
+        }
+
+        // Valore atteso nel campo scalare (mod r)
+        let expected_share_fr = biguint_to_fr(aggregated_share);
+
+        // Logging (rappresentanti in BigUint, entrambi mod r)
+        let decrypted_aggregated_biguint = fr_to_biguint(&accumulated_share_fr);
+        let expected_share_biguint = fr_to_biguint(&expected_share_fr);
+
+        println!(
+            "  Decrypted combined (Lagrange-weighted) share (mod r) = {}",
+            decrypted_aggregated_biguint
+        );
+        println!(
+            "  Expected aggregated share              (mod r) = {}",
+            expected_share_biguint
+        );
+
+        if accumulated_share_fr == expected_share_fr {
+            println!("  ✓ Decryption matches aggregated share for P{}", party_id);
+        } else {
+            println!(
+                "  ✗ Decryption DOES NOT match aggregated share for P{}",
+                party_id
+            );
+            all_ok = false;
+        }
+
+        // verify commitment corresponds to generator * aggregated_share_fr
+        let aggregated_share_fr = biguint_to_fr(aggregated_share);
+        let expected_commitment = EdwardsProjective::generator() * aggregated_share_fr;
+
+        let commitment = &new_commitments[idx].1;
+        if *commitment == expected_commitment {
+            println!("  ✓ Commitment matches generator * share for P{}", party_id);
+        } else {
+            println!("  ✗ Commitment mismatch for P{}", party_id);
+            all_ok = false;
+        }
+    }
+
+    // --- Parte aggregazione PK dai nuovi commitment: la tua logica era già corretta ---
+
+    let selected_count = std::cmp::min(PHASE2_THRESHOLD, new_parties.len());
+    if selected_count == 0 {
+        println!("  ✗ No new parties available to check aggregated public key");
+        return;
+    }
+
+    let selected_indices: Vec<usize> = (0..selected_count).collect();
+    let new_x_coords: Vec<BigUint> = selected_indices
+        .iter()
+        .map(|&i| BigUint::from(new_parties[i] as u32))
+        .collect();
+
+    let new_lagrange_coeffs = match poly.lagrange_coefficients(&new_x_coords, &BigUint::zero()) {
+        Some(v) => v,
+        None => {
+            println!("  ✗ Failed to compute new Lagrange coeffs for public key aggregation");
+            return;
+        }
+    };
+
+    let mut aggregated_pk = EdwardsProjective::zero();
+    for (i, &sel_i) in selected_indices.iter().enumerate() {
+        let (party_id, _) = new_aggregated_shares[sel_i];
+        let commit = new_commitments
+            .iter()
+            .find(|(pid, _)| *pid == party_id)
+            .map(|(_, c)| *c)
+            .expect("commitment missing for selected new party");
+
+        let coeff_fr = biguint_to_fr(&new_lagrange_coeffs[i]);
+        aggregated_pk = aggregated_pk + commit * coeff_fr;
+    }
+
+    println!("\nAggregated public key (from commitments) computed.");
+    println!(
+        "Expected public key matches aggregated: {}",
+        aggregated_pk == expected_pk
+    );
+
+    if all_ok && aggregated_pk == expected_pk {
+        println!("\nDISTRIBUTE finalize: all checks passed ✅");
+    } else {
+        println!("\nDISTRIBUTE finalize: some checks failed ❌");
+    }
+}
+
 fn main() {
     println!("=== Malicious-Secure DKG with PKI and Encryption ===\n");
     println!("Phase 1: {} parties, threshold {}", PHASE1_PARTIES, PHASE1_THRESHOLD);
@@ -531,6 +689,23 @@ fn phase2(
         &old_party_indices,
         &new_party_shares,
     );
+
+        // expected_pk calcolato come prima (usa la chiave aggregata originale)
+    let expected_pk = EdwardsProjective::generator() * biguint_to_fr(&_original_key);
+
+    // finalize distribute: ricostruisce ciphertext aggregati, li decripta e verifica commit / pk aggregata
+    finalize_distribute(
+        poly,
+        &old_party_indices,
+        &new_parties,
+        &encrypted_new_shares,
+        &new_party_shares,
+        &new_aggregated_shares,
+        &new_commitments,
+        &elgamal_keys,
+        expected_pk,
+    );
+
     
     // Reconstruct using random subset of new shares
     let mut selected_new: Vec<usize> = (0..PHASE2_PARTIES).collect();

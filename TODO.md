@@ -10,3 +10,7 @@
   - [ ] implement elligator2 in project
   - [ ] testing
 - [ ] get an idea of what lacks
+
+
+
+la cartella build deve essere tale da esser creata dentro script!
